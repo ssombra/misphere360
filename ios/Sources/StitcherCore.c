@@ -228,7 +228,7 @@ int stitch_dual_fisheye_c(const char *in_jpg_path, const char *lut_bin_path, con
             float rgb2[3] = {0, 0, 0};
 
             if (w1 > 0.0001f) {
-                float u1 = bw00 * lut->u1[k00] + bw10 * lut->u1[k10] + bw01 * lut->u1[k01] + bw11 * lut->w1[k11];
+                float u1 = bw00 * lut->u1[k00] + bw10 * lut->u1[k10] + bw01 * lut->u1[k01] + bw11 * lut->u1[k11];
                 float v1 = bw00 * lut->v1[k00] + bw10 * lut->v1[k10] + bw01 * lut->v1[k01] + bw11 * lut->v1[k11];
                 sample_bilinear(in_buf, W, H, u1, v1, rgb1);
                 rgb1[0] -= (1.0f - cw) * dr;
