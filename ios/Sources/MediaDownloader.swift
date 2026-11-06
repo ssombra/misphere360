@@ -18,7 +18,7 @@ public class MediaDownloader: ObservableObject {
         public let isVideo: Bool
         public var url: URL {
             let clean = filename.hasSuffix("AA.JPG") ? String(filename.dropLast(6)) + ".JPG" : filename
-            return URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)/DCIM/\(folder)/\(filename)")!
+            return URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)/DCIM/\(folder)/\(clean)")!
         }
     }
 

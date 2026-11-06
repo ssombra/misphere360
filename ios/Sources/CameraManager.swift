@@ -45,8 +45,9 @@ public class CameraManager: ObservableObject {
 
         let host = NWEndpoint.Host(CameraManager.cameraIP)
         let port = NWEndpoint.Port(rawValue: CameraManager.controlPort)!
-        let params = NWParameters.tcp
-        params.enableKeepalive = true
+        let tcpOptions = NWProtocolTCP.Options()
+        tcpOptions.enableKeepalive = true
+        let params = NWParameters(tls: nil, tcp: tcpOptions)
 
         connection = NWConnection(host: host, port: port, using: params)
         connection?.stateUpdateHandler = { [weak self] state in
