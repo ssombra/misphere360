@@ -3,7 +3,7 @@ import Photos
 import UIKit
 import Combine
 
-/// Descarga fotos y videos desde la cámara y los guarda en el Carrete de Apple Fotos
+/// Descarga fotos y videos desde la cámara Xiaomi Mi Sphere 360 y los guarda en el Carrete de Apple Fotos
 public class MediaDownloader: ObservableObject {
     public static let shared = MediaDownloader()
 
@@ -11,66 +11,259 @@ public class MediaDownloader: ObservableObject {
     @Published public var downloadProgress: Float = 0.0
     @Published public var statusMessage: String = ""
 
+    /// Prefijo de ruta que ya funcionó previamente (ej. "", "/DCIM", etc.) para acelerar descargas siguientes
+    private var rememberedWorkingPrefix: String? = nil
+
+    private lazy var session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 6.0
+        config.timeoutIntervalForResource = 180.0
+        config.waitsForConnectivity = false
+        config.allowsCellularAccess = true
+        return URLSession(configuration: config)
+    }()
+
     public func saveMediaToCameraRoll(item: SDFileItem, completion: @escaping (Bool, String) -> Void) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
-                DispatchQueue.main.async { completion(false, "Permiso denegado para guardar fotos.") }
+                DispatchQueue.main.async {
+                    completion(false, "Permiso denegado para guardar en Apple Fotos. Concede permiso en Ajustes > Mi Sphere 360.")
+                }
                 return
             }
 
             DispatchQueue.main.async {
                 self.isDownloading = true
                 self.downloadProgress = 0.0
-                self.statusMessage = "Descargando \(item.filename)..."
+                self.statusMessage = "Buscando \(item.filename)..."
             }
 
-            // Probar la URL con sufijo AA (formato real en el disco FAT32) y sin sufijo
-            let rawName = item.filename
-            var candidateNames = [rawName]
-            if rawName.uppercased().hasSuffix(".JPG") && !rawName.uppercased().hasSuffix("AA.JPG") {
-                let stem = String(rawName.dropLast(4))
-                candidateNames.insert("\(stem)AA.JPG", at: 0)
-            }
-
-            self.tryDownloadCandidates(folder: item.folder, candidates: candidateNames, isVideo: item.isVideo, completion: completion)
+            self.buildAndTryCandidates(item: item, completion: completion)
         }
     }
 
-    private func tryDownloadCandidates(folder: String, candidates: [String], isVideo: Bool, completion: @escaping (Bool, String) -> Void) {
-        guard let first = candidates.first else {
+    private func filenameVariants(for filename: String) -> [String] {
+        let clean = filename.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var variants: [String] = []
+        let upper = clean.uppercased()
+
+        if upper.hasSuffix(".JPG") {
+            let stem: String
+            if upper.hasSuffix("AA.JPG") {
+                stem = String(clean.dropLast(6))
+                variants.append(clean)
+                variants.append("\(stem).JPG")
+                variants.append("\(stem)aa.jpg")
+                variants.append("\(stem).jpg")
+            } else {
+                stem = String(clean.dropLast(4))
+                // En el sistema FAT32 real de la tarjeta SD, Ambarella guarda con sufijo AA
+                variants.append("\(stem)AA.JPG")
+                variants.append("\(stem)aa.jpg")
+                variants.append(clean)
+                variants.append("\(stem).jpg")
+            }
+        } else if upper.hasSuffix(".MP4") {
+            let stem: String
+            if upper.hasSuffix("AA.MP4") {
+                stem = String(clean.dropLast(6))
+                variants.append(clean)
+                variants.append("\(stem).MP4")
+                variants.append("\(stem)aa.mp4")
+            } else {
+                stem = String(clean.dropLast(4))
+                variants.append("\(stem)AA.MP4")
+                variants.append(clean)
+                variants.append("\(stem)aa.mp4")
+            }
+        } else {
+            variants.append(clean)
+        }
+
+        // Eliminar duplicados preservando orden
+        var unique: [String] = []
+        for v in variants where !unique.contains(v) {
+            unique.append(v)
+        }
+        return unique
+    }
+
+    private func buildAndTryCandidates(item: SDFileItem, completion: @escaping (Bool, String) -> Void) {
+        let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let nameVariants = filenameVariants(for: item.filename)
+
+        // Variantes de prefijos de directorios según cómo el servidor Cherokee de la cámara mapee la raíz
+        var prefixes = ["", "/DCIM", "/SD0/DCIM", "/tmp/SD0/DCIM"]
+        if let remembered = rememberedWorkingPrefix {
+            prefixes.removeAll(where: { $0 == remembered })
+            prefixes.insert(remembered, at: 0)
+        }
+
+        var candidateURLs: [URL] = []
+        for prefix in prefixes {
+            for vname in nameVariants {
+                let urlStr = "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)\(prefix)/\(cleanFolder)/\(vname)"
+                if let u = URL(string: urlStr), !candidateURLs.contains(u) {
+                    candidateURLs.append(u)
+                }
+            }
+        }
+
+        // Primero intentar descubrir mediante inspección rápida del índice HTML de Cherokee
+        discoverCherokeeExactLink(folder: cleanFolder, filename: item.filename) { [weak self] discoveredURL in
+            guard let self = self else { return }
+            var finalCandidates = candidateURLs
+            if let disc = discoveredURL {
+                finalCandidates.insert(disc, at: 0)
+            }
+            self.executeCandidateDownload(candidates: finalCandidates, item: item, triedErrors: [], completion: completion)
+        }
+    }
+
+    private func discoverCherokeeExactLink(folder: String, filename: String, completion: @escaping (URL?) -> Void) {
+        let probeURLs = [
+            "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)/\(folder)/",
+            "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)/DCIM/\(folder)/",
+            "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)/"
+        ]
+
+        let variants = filenameVariants(for: filename).map { $0.uppercased() }
+
+        func checkProbe(index: Int) {
+            guard index < probeURLs.count else {
+                completion(nil)
+                return
+            }
+            guard let u = URL(string: probeURLs[index]) else {
+                checkProbe(index: index + 1)
+                return
+            }
+
+            var req = URLRequest(url: u)
+            req.timeoutInterval = 2.5
+            self.session.dataTask(with: req) { data, resp, _ in
+                if let http = resp as? HTTPURLResponse, http.statusCode == 200,
+                   let data = data, let html = String(data: data, encoding: .utf8) {
+                    // Buscar enlaces href que contengan alguna de las variantes
+                    for v in variants {
+                        if html.uppercased().contains(v) {
+                            // Extraer el href específico
+                            let pattern = "href=[\"']([^\"']*" + NSRegularExpression.escapedPattern(for: v) + "[^\"']*)[\"']"
+                            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+                               let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+                               let range = Range(match.range(at: 1), in: html) {
+                                let href = String(html[range])
+                                if let resolved = URL(string: href, relativeTo: u)?.absoluteURL {
+                                    completion(resolved)
+                                    return
+                                }
+                            }
+                        }
+                    }
+                }
+                checkProbe(index: index + 1)
+            }.resume()
+        }
+
+        checkProbe(index: 0)
+    }
+
+    private func executeCandidateDownload(
+        candidates: [URL],
+        item: SDFileItem,
+        triedErrors: [String],
+        completion: @escaping (Bool, String) -> Void
+    ) {
+        guard let currentURL = candidates.first else {
             DispatchQueue.main.async {
                 self.isDownloading = false
-                completion(false, "No se pudo descargar el archivo de la cámara.")
+                let details = triedErrors.suffix(2).joined(separator: "; ")
+                completion(false, "No se pudo descargar de la cámara. Comprueba que el Wi-Fi esté conectado. (\(details.isEmpty ? "Error 404" : details))")
             }
             return
         }
 
-        let testURL = URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)/DCIM/\(folder)/\(first)")!
         let remaining = Array(candidates.dropFirst())
+        DispatchQueue.main.async {
+            self.statusMessage = "Descargando desde cámara..."
+        }
 
-        let task = URLSession.shared.downloadTask(with: testURL) { localURL, response, error in
+        var req = URLRequest(url: currentURL)
+        req.timeoutInterval = 30.0
+
+        let task = session.downloadTask(with: req) { [weak self] localURL, response, error in
+            guard let self = self else { return }
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
             if statusCode == 200, let localURL = localURL {
+                // Éxito: Recordar el prefijo de la URL para acelerar descargas siguientes
+                let pathStr = currentURL.path
+                if pathStr.contains("/DCIM/") {
+                    self.rememberedWorkingPrefix = "/DCIM"
+                } else if pathStr.contains("/SD0/DCIM/") {
+                    self.rememberedWorkingPrefix = "/SD0/DCIM"
+                } else if pathStr.contains("/tmp/SD0/DCIM/") {
+                    self.rememberedWorkingPrefix = "/tmp/SD0/DCIM"
+                } else {
+                    self.rememberedWorkingPrefix = ""
+                }
+
+                // CRÍTICO: Copiar inmediatamente el archivo descargado a un destino temporal propio
+                // porque iOS borra automáticamente el archivo de 'localURL' en cuanto termina este bloque
+                let ext = item.isVideo ? "MP4" : "JPG"
+                let safeName = "MiSphere_\(UUID().uuidString).\(ext)"
+                let destinationURL = FileManager.default.temporaryDirectory.appendingPathComponent(safeName)
+
+                try? FileManager.default.removeItem(at: destinationURL)
+
+                do {
+                    try FileManager.default.copyItem(at: localURL, to: destinationURL)
+                } catch {
+                    DispatchQueue.main.async {
+                        self.isDownloading = false
+                        completion(false, "Error al preparar archivo para Fotos: \(error.localizedDescription)")
+                    }
+                    return
+                }
+
+                DispatchQueue.main.async {
+                    self.statusMessage = "Guardando en Apple Fotos..."
+                }
+
                 PHPhotoLibrary.shared().performChanges({
-                    if isVideo {
-                        PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: localURL)
+                    if item.isVideo {
+                        PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: destinationURL)
                     } else {
-                        PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: localURL)
+                        PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: destinationURL)
                     }
                 }) { success, saveError in
+                    // Limpiar copia temporal
+                    try? FileManager.default.removeItem(at: destinationURL)
+
                     DispatchQueue.main.async {
                         self.isDownloading = false
                         if success {
-                            completion(true, "Guardado exitosamente en Carrete.")
+                            completion(true, "¡Guardado exitosamente en tu Carrete de Apple Fotos!")
                         } else {
-                            completion(false, saveError?.localizedDescription ?? "Error al guardar en Carrete.")
+                            completion(false, saveError?.localizedDescription ?? "Error al escribir en Carrete de Fotos.")
                         }
                     }
                 }
             } else {
-                // Probar siguiente variante
-                self.tryDownloadCandidates(folder: folder, candidates: remaining, isVideo: isVideo, completion: completion)
+                // Registrar intento fallido y probar la siguiente URL candidata
+                var errDesc = "HTTP \(statusCode)"
+                if let err = error {
+                    errDesc = err.localizedDescription
+                }
+                var updatedErrors = triedErrors
+                updatedErrors.append("\(currentURL.lastPathComponent): \(errDesc)")
+
+                self.executeCandidateDownload(
+                    candidates: remaining,
+                    item: item,
+                    triedErrors: updatedErrors,
+                    completion: completion
+                )
             }
         }
         task.resume()

@@ -564,15 +564,35 @@ public class CameraManager: ObservableObject {
     }
 
     public func deleteSDFile(folder: String, filename: String, completion: @escaping (Bool) -> Void) {
-        let fullPath = "/tmp/SD0/DCIM/\(folder)/\(filename)"
-        sendCommand(msgId: 1281, param: fullPath) { resp in
-            let rval = resp["rval"] as? Int ?? -1
-            let ok = rval == 0
-            if ok {
-                self.fetchStorageStatus()
-            }
-            DispatchQueue.main.async { completion(ok) }
+        let cleanFolder = folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var variants = [filename]
+        let upper = filename.uppercased()
+        if upper.hasSuffix(".JPG") && !upper.hasSuffix("AA.JPG") {
+            let stem = String(filename.dropLast(4))
+            variants.insert("\(stem)AA.JPG", at: 0)
+        } else if upper.hasSuffix(".MP4") && !upper.hasSuffix("AA.MP4") {
+            let stem = String(filename.dropLast(4))
+            variants.insert("\(stem)AA.MP4", at: 0)
         }
+
+        func tryDelete(cands: [String]) {
+            guard let first = cands.first else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+            let fullPath = "/tmp/SD0/DCIM/\(cleanFolder)/\(first)"
+            self.sendCommand(msgId: 1281, param: fullPath) { resp in
+                let rval = resp["rval"] as? Int ?? -1
+                if rval == 0 {
+                    self.fetchStorageStatus()
+                    DispatchQueue.main.async { completion(true) }
+                } else {
+                    tryDelete(cands: Array(cands.dropFirst()))
+                }
+            }
+        }
+
+        tryDelete(cands: variants)
     }
 
     private func decodeShutter(_ rawVal: Int) -> String {
