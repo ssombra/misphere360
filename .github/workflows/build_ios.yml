@@ -1,0 +1,52 @@
+name: Compilar Mi Sphere 360 para iOS
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: # Permite compilar manualmente con un clic en GitHub
+
+jobs:
+  build:
+    name: Compilar IPA (Xcode Cloud)
+    runs-on: macos-14
+
+    steps:
+      - name: Descargar Código
+        uses: actions/checkout@v4
+
+      - name: Instalar XcodeGen
+        run: |
+          brew install xcodegen
+
+      - name: Generar Proyecto de Xcode
+        run: |
+          cd ios
+          xcodegen generate
+
+      - name: Compilar y Empaquetar Archivo (.xcarchive)
+        run: |
+          cd ios
+          xcodebuild -project MiSphere360.xcodeproj \
+            -scheme MiSphere360 \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive -archivePath ../build/MiSphere360.xcarchive
+
+      - name: Crear Instalador (.ipa)
+        run: |
+          mkdir -p build/Payload
+          cp -R build/MiSphere360.xcarchive/Products/Applications/MiSphere360.app build/Payload/
+          cd build
+          zip -qr MiSphere360.ipa Payload
+          ls -lh MiSphere360.ipa
+
+      - name: Subir Instalador IPA a GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiSphere360-iOS-IPA
+          path: build/MiSphere360.ipa
+          retention-days: 14

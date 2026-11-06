@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.pyc
+Descargas/
+build/
+*.xcarchive
+*.xcodeproj
+Mi Sphere 360.app
+session_log.json

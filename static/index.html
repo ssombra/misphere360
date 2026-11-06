@@ -1,0 +1,2617 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mi Sphere 360 — Panel de Control Pro</title>
+  <style>
+    :root {
+      --bg: #0d1017;
+      --panel: #161b26;
+      --panel-alt: #1d2433;
+      --border: #2a344a;
+      --text: #f0f4f8;
+      --muted: #8b9bb4;
+      --accent: #ff6700;
+      --accent-hover: #ff812b;
+      --green: #10b981;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --radius: 14px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1220px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* Header / Status Bar */
+    .topbar {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #ff6700, #ff3d00);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 16px;
+      letter-spacing: -0.5px;
+      box-shadow: 0 4px 14px rgba(255, 103, 0, 0.35);
+    }
+
+    .brand h1 {
+      font-size: 19px;
+      font-weight: 700;
+    }
+
+    .brand-sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge.online {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+
+    .badge.offline {
+      background: rgba(245, 158, 11, 0.14);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .telemetry {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .stat-pill {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      padding: 8px 13px;
+      border-radius: 10px;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .stat-pill span.label {
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-pill span.val {
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .actions-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    button {
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--panel-alt);
+      color: var(--text);
+      padding: 9px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.15s ease;
+    }
+
+    button:hover {
+      border-color: #4b5b7c;
+      background: #252e42;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    button.primary:hover {
+      background: var(--accent-hover);
+    }
+
+    button.danger {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #f87171;
+    }
+
+    button.danger:hover {
+      background: rgba(239, 68, 68, 0.25);
+    }
+
+    /* Main Grid */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 410px;
+      gap: 18px;
+    }
+
+    @media (max-width: 960px) {
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+    }
+
+    .card-header h2 {
+      font-size: 16px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Mode Switcher */
+    .mode-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background: var(--bg);
+      padding: 5px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      gap: 6px;
+    }
+
+    .mode-tab {
+      padding: 12px;
+      text-align: center;
+      border-radius: 9px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .mode-tab.active {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 3px 12px rgba(255, 103, 0, 0.3);
+    }
+
+    /* Controls Sections */
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .control-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+
+    .control-label span.current-tag {
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 12px;
+      background: rgba(255, 103, 0, 0.12);
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
+
+    .pill-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .pill-btn {
+      padding: 8px 12px;
+      border-radius: 9px;
+      font-size: 12.5px;
+      font-weight: 600;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .pill-btn.active {
+      background: rgba(255, 103, 0, 0.2);
+      border-color: var(--accent);
+      color: #ff984f;
+      box-shadow: inset 0 0 0 1px var(--accent);
+    }
+
+    .shutter-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+      gap: 6px;
+    }
+
+    .shutter-grid .pill-btn {
+      text-align: center;
+      padding: 7px 6px;
+      font-size: 12px;
+    }
+
+    /* Sub-mode box */
+    .submode-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* Shutter Panel (Right Column) */
+    .shutter-zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 22px 16px;
+      background: radial-gradient(circle at center, rgba(255, 103, 0, 0.12), transparent 70%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      gap: 14px;
+    }
+
+    .shutter-ring {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      border: 4px solid #fff;
+      padding: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: transform 0.12s ease;
+      background: transparent;
+    }
+
+    .shutter-ring:hover {
+      transform: scale(1.04);
+    }
+
+    .shutter-ring:active {
+      transform: scale(0.95);
+    }
+
+    .shutter-inner {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: var(--accent);
+      transition: all 0.2s ease;
+    }
+
+    .shutter-ring.video-mode .shutter-inner {
+      background: var(--red);
+    }
+
+    .shutter-ring.recording .shutter-inner {
+      border-radius: 8px;
+      width: 54%;
+      height: 54%;
+      background: var(--red);
+    }
+
+    /* Console Log */
+    .log-box {
+      background: #090b10;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      height: 230px;
+      overflow-y: auto;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11.5px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .log-entry {
+      line-height: 1.4;
+      word-break: break-all;
+    }
+
+    .log-entry.OUT {
+      color: #60a5fa;
+    }
+
+    .log-entry.IN {
+      color: #34d399;
+    }
+
+    .log-entry.ERR {
+      color: #f87171;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #1e293b;
+      border: 1px solid #475569;
+      color: #fff;
+      padding: 12px 18px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+      display: none;
+      z-index: 1000;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* Visor 360° Interactivo (WebGL) */
+    .viewer360-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(8, 10, 15, 0.94);
+      backdrop-filter: blur(8px);
+      z-index: 2000;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+
+    .viewer360-topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 20px;
+      background: #141824;
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .viewer360-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .viewer360-stage {
+      position: relative;
+      flex: 1;
+      width: 100%;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #05070b;
+    }
+
+    #viewer360Canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: grab;
+    }
+
+    #viewer360Canvas:active {
+      cursor: grabbing;
+    }
+
+    #viewer360FlatImg {
+      max-width: 96%;
+      max-height: 94%;
+      object-fit: contain;
+      border-radius: 8px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+    }
+
+    .viewer360-loader {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: rgba(5, 7, 11, 0.78);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      pointer-events: none;
+    }
+
+    .viewer360-hint {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.82);
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      color: #e2e8f0;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- BARRA SUPERIOR -->
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-icon">360°</div>
+        <div>
+          <h1>Xiaomi Mi Sphere 360</h1>
+          <div class="brand-sub">
+            <span id="connBadge" class="badge offline">
+              <span class="dot"></span>
+              <span id="connText">Modo Vista Previa (Sin conexión TCP)</span>
+            </span>
+            <span id="camSerial">MJXJ-010135</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="telemetry">
+        <div class="stat-pill">
+          <span class="label">Batería</span>
+          <span class="val" id="statBattery">--</span>
+        </div>
+        <div class="stat-pill">
+          <span class="label">microSD Libre</span>
+          <span class="val" id="statStorage">--</span>
+        </div>
+        <div class="stat-pill">
+          <span class="label">Fotos Restantes</span>
+          <span class="val" id="statPhotos">--</span>
+        </div>
+        <div class="stat-pill">
+          <span class="label">Video Restante</span>
+          <span class="val" id="statVideo">--</span>
+        </div>
+      </div>
+
+      <div class="actions-row">
+        <button class="primary" onclick="connectCamera()">🔌 Conectar y Sincronizar Hora</button>
+        <button onclick="refreshCamera()">🔄 Refrescar</button>
+        <button class="danger" onclick="disconnectCamera()">Desconectar</button>
+      </div>
+    </div>
+
+    <!-- CUERPO PRINCIPAL -->
+    <div class="main-grid">
+      <!-- COLUMNA IZQUIERDA: CONTROLES DE FOTO Y VIDEO -->
+      <div class="card">
+        <div class="mode-tabs">
+          <button id="tabPhoto" class="mode-tab active" onclick="switchMode(1)">📸 MODO FOTO</button>
+          <button id="tabVideo" class="mode-tab" onclick="switchMode(0)">🎥 MODO VIDEO</button>
+        </div>
+
+        <!-- PANEL FOTO -->
+        <div id="photoPanel" style="display:flex; flex-direction:column; gap:18px;">
+          <!-- Resolución de Foto -->
+          <div class="control-group">
+            <div class="control-label">
+              <span>Resolución de Foto y Cosido 360° (msg_id: 4872)</span>
+              <span class="current-tag" id="tagPhotoRes">--</span>
+            </div>
+            <div class="pill-grid" id="photoResGrid"></div>
+          </div>
+
+          <!-- ISO -->
+          <div class="control-group">
+            <div class="control-label">
+              <span>Sensibilidad ISO (msg_id: 5172)</span>
+              <span class="current-tag" id="tagPhotoIso">--</span>
+            </div>
+            <div class="pill-grid" id="photoIsoGrid"></div>
+          </div>
+
+          <!-- Velocidad de Obturación -->
+          <div class="control-group">
+            <div class="control-label">
+              <span>Velocidad de Obturación / Exposición Larga hasta 32s (msg_id: 5171)</span>
+              <span class="current-tag" id="tagPhotoShutter">--</span>
+            </div>
+            <div class="shutter-grid" id="photoShutterGrid"></div>
+          </div>
+
+          <!-- Balance de Blancos Foto -->
+          <div class="control-group">
+            <div class="control-label">
+              <span>Balance de Blancos (msg_id: 5168)</span>
+              <span class="current-tag" id="tagPhotoWb">--</span>
+            </div>
+            <div class="pill-grid" id="photoWbGrid"></div>
+          </div>
+
+          <!-- Exposición EV Foto -->
+          <div class="control-group">
+            <div class="control-label">
+              <span>Compensación de Exposición EV (msg_id: 5169)</span>
+              <span class="current-tag" id="tagPhotoEv">--</span>
+            </div>
+            <div class="pill-grid" id="photoEvGrid"></div>
+          </div>
+
+          <!-- Sub-modos de Foto: Timer, Intervalómetro, Bracketing -->
+          <div class="submode-box">
+            <div class="control-label">
+              <span>Modos Especiales de Disparo (Temporizador / Intervalómetro / Bracketing AEB)</span>
+              <button onclick="resetPhotoSubmodes()" style="padding:4px 10px; font-size:11.5px;">Restablecer a Disparo Normal</button>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label">
+                <span>⏱️ Temporizador (msg_id: 4866)</span>
+                <span class="current-tag" id="tagTimer">--</span>
+              </div>
+              <div class="pill-grid" id="photoTimerGrid"></div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label">
+                <span>🔁 Intervalómetro Timelapse Foto (msg_id: 4929)</span>
+                <span class="current-tag" id="tagInterval">--</span>
+              </div>
+              <div class="pill-grid" id="photoIntervalGrid"></div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label">
+                <span>🌗 Bracketing AEB / HDR (msg_id: 4918)</span>
+                <span class="current-tag" id="tagBracketing">--</span>
+              </div>
+              <div class="pill-grid" id="photoBracketingGrid"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL VIDEO -->
+        <div id="videoPanel" class="hidden" style="display:flex; flex-direction:column; gap:18px;">
+          <!-- Resolución de Video -->
+          <div class="control-group">
+            <div class="control-label">
+              <span>Resolución y Cuadros por Segundo (msg_id: 4612)</span>
+              <span class="current-tag" id="tagVideoRes">--</span>
+            </div>
+            <div class="pill-grid" id="videoResGrid"></div>
+          </div>
+
+          <!-- Balance de Blancos Video -->
+          <div class="control-group">
+            <div class="control-label">
+              <span>Balance de Blancos de Video (msg_id: 5136)</span>
+              <span class="current-tag" id="tagVideoWb">--</span>
+            </div>
+            <div class="pill-grid" id="videoWbGrid"></div>
+          </div>
+
+          <!-- Exposición EV Video -->
+          <div class="control-group">
+            <div class="control-label">
+              <span>Compensación de Exposición EV de Video (msg_id: 5137)</span>
+              <span class="current-tag" id="tagVideoEv">--</span>
+            </div>
+            <div class="pill-grid" id="videoEvGrid"></div>
+          </div>
+
+          <!-- Sub-modos de Video -->
+          <div class="submode-box">
+            <div class="control-label">
+              <span>Modos Especiales de Video (Video Corto / Timelapse / Slow Motion)</span>
+              <button onclick="resetVideoSubmodes()" style="padding:4px 10px; font-size:11.5px;">Restablecer a Video Normal</button>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label">
+                <span>🎬 Video Corto (msg_id: 4618)</span>
+                <span class="current-tag" id="tagShortVideo">--</span>
+              </div>
+              <div class="pill-grid" id="videoShortGrid"></div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label">
+                <span>⏩ Intervalo de Video Timelapse (msg_id: 4621)</span>
+                <span class="current-tag" id="tagTimelapse">--</span>
+              </div>
+              <div class="pill-grid" id="videoTimelapseGrid"></div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label">
+                <span>🐢 Cámara Lenta / Slow Motion (msg_id: 4916)</span>
+                <span class="current-tag" id="tagSlowmo">--</span>
+              </div>
+              <div class="pill-grid" id="videoSlowmoGrid"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COLUMNA DERECHA: VISTA EN VIVO + DISPARADOR + SISTEMA + CONSOLA -->
+      <div style="display:flex; flex-direction:column; gap:18px;">
+        <!-- Vista en Vivo 360° (RTSP -> WebGL) -->
+        <div class="card">
+          <div class="card-header" style="flex-wrap:wrap; gap:8px;">
+            <div>
+              <h2>📺 Vista en Vivo 360°</h2>
+              <div id="liveSubStatus" style="font-size:11.5px; color:var(--muted); margin-top:2px;">
+                Apagada (ahorro de batería y temperatura)
+              </div>
+            </div>
+            <button id="btnToggleLive" class="primary" onclick="toggleLiveView()" style="padding:7px 12px; font-size:12.5px;">
+              👁️ Encender Vista en Vivo
+            </button>
+          </div>
+
+          <div id="liveViewContainer" class="hidden" style="display:flex; flex-direction:column; gap:10px;">
+            <div class="pill-grid" id="liveModeGrid" style="justify-content:space-between;">
+              <button id="btnLiveMode0" class="pill-btn active" style="flex:1; padding:6px 8px; font-size:11.5px; text-align:center;" onclick="setLiveViewMode(0)">
+                🌐 Esfera 360°
+              </button>
+              <button id="btnLiveMode1" class="pill-btn" style="flex:1; padding:6px 8px; font-size:11.5px; text-align:center;" onclick="setLiveViewMode(1)">
+                🗺️ Panorama 360°
+              </button>
+              <button id="btnLiveMode2" class="pill-btn" style="flex:1; padding:6px 8px; font-size:11.5px; text-align:center;" onclick="setLiveViewMode(2)">
+                🔘 2 Esferas
+              </button>
+            </div>
+
+            <div id="liveStage" style="position:relative; width:100%; height:240px; background:#05070b; border:1px solid var(--border); border-radius:12px; overflow:hidden; user-select:none;">
+              <canvas id="liveCanvas" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
+
+              <div id="liveOverlayMsg" style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; background:rgba(5,7,11,0.78); color:#e2e8f0; font-size:12.5px; font-weight:600; text-align:center; padding:14px; pointer-events:none;">
+                <span style="font-size:22px;">📡</span>
+                <span id="liveOverlayText">Conectando a rtsp://192.168.42.1/live...</span>
+              </div>
+
+              <div style="position:absolute; top:8px; right:8px; display:flex; gap:6px;">
+                <button onclick="resetLiveCameraOrientation()" title="Centrar vista 360°" style="padding:4px 8px; font-size:11px; background:rgba(15,23,42,0.82);">
+                  🎯 Centrar
+                </button>
+                <button onclick="toggleLiveFullscreen()" title="Pantalla completa" style="padding:4px 8px; font-size:11px; background:rgba(15,23,42,0.82);">
+                  ⛶ Ampliar
+                </button>
+              </div>
+
+              <div id="liveHintBar" style="position:absolute; bottom:6px; left:50%; transform:translateX(-50%); background:rgba(15,23,42,0.78); color:#cbd5e1; font-size:10.5px; padding:3px 10px; border-radius:999px; white-space:nowrap; pointer-events:none;">
+                🖱️ Arrastra para girar en vivo • Rueda para Zoom
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Disparador -->
+        <div class="card">
+          <div class="card-header">
+            <h2>🎯 Disparador Remoto</h2>
+            <span id="activeModeLabel" style="font-size:12px; color:var(--muted);">Modo Foto</span>
+          </div>
+
+          <div class="shutter-zone">
+            <button id="mainShutterBtn" class="shutter-ring" onclick="triggerPrimaryShutter()">
+              <div class="shutter-inner"></div>
+            </button>
+            <div id="shutterHint" style="font-size:13px; font-weight:600; text-align:center;">
+              Toca para Tomar Foto (msg_id: 4864)
+            </div>
+
+            <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center; width:100%;">
+              <button id="btnSecondaryShutter" onclick="sendCmd('photo_shutter_long')">⏱️ Disparo con Timer (4868)</button>
+              <button id="btnStopVideo" class="danger hidden" onclick="sendCmd('video_stop')">⏹️ Detener Video (514)</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ajustes rápidos de sistema -->
+        <div class="card">
+          <div class="card-header">
+            <h2>⚙️ Sistema de la Cámara</h2>
+          </div>
+
+          <div class="control-group">
+            <div class="control-label">
+              <span>🔊 Volumen de Pitido (Buzzer)</span>
+              <span class="current-tag" id="tagBuzzer">--</span>
+            </div>
+            <div class="pill-grid" id="sysBuzzerGrid"></div>
+          </div>
+
+          <div class="control-group">
+            <div class="control-label">
+              <span>💡 Indicador LED</span>
+              <span class="current-tag" id="tagLed">--</span>
+            </div>
+            <div class="pill-grid">
+              <button class="pill-btn" id="btnLed1" onclick="sendCmd('led', 1)">Encendido</button>
+              <button class="pill-btn" id="btnLed0" onclick="sendCmd('led', 0)">Apagado</button>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap; padding-top:4px;">
+            <button onclick="sendCmd('gyro_calib')" style="flex:1;">🧭 Calibrar Giroscopio</button>
+            <button class="danger" onclick="confirmPowerOff()" style="flex:1;">⏻ Apagar Cámara</button>
+          </div>
+        </div>
+
+        <!-- Consola TCP en vivo -->
+        <div class="card">
+          <div class="card-header">
+            <h2>📡 Monitor TCP JSON (192.168.42.1:7878)</h2>
+          </div>
+          <div id="logBox" class="log-box"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- GESTOR DE TARJETA MICROSD (CARPETAS, DESCARGA Y BORRADO) -->
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap; gap:12px;">
+        <div>
+          <h2>📁 Gestor de Tarjeta microSD (DCIM: Descargar, Coser 360° y Borrar)</h2>
+          <div style="font-size:12px; color:var(--muted); margin-top:4px;">
+            Detecta automáticamente si cada foto es de <b>2 esferas</b> (la cose ópticamente, iguala luz y agrega EXIF + XMP <code style="color:#34d399;">GPano</code>) o si ya viene <b>Cocida 360 en cámara</b> (solo inyecta XMP <code style="color:#34d399;">GPano</code> sin pérdida de calidad).
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <button onclick="refreshFoldersFromCamera()">🔄 Actualizar Carpetas SD</button>
+        </div>
+      </div>
+
+      <!-- Selector de Modo de Guardado 360° (Punto 1) -->
+      <div class="submode-box" style="padding:10px 14px; flex-direction:row; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+        <div style="font-size:12.5px; font-weight:600; color:#cbd5e1;">
+          🌐 Modo al guardar carpeta en tu Mac (siempre te preguntará en qué carpeta guardar):
+        </div>
+        <div class="pill-grid" id="sdStitchModeGrid">
+          <button class="pill-btn active" id="btnMode360" onclick="setSdStitchMode('360')">🌐 Solo 360° Lista para Subir</button>
+          <button class="pill-btn" id="btnModeBoth" onclick="setSdStitchMode('both')">📦 Ambas (Original + _360.JPG)</button>
+          <button class="pill-btn" id="btnModeRaw" onclick="setSdStitchMode('raw')">🔘 Solo Original</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 320px 1fr; gap:16px;">
+        <!-- Lista de Carpetas DCIM -->
+        <div class="submode-box" style="max-height:360px; overflow-y:auto;">
+          <div class="control-label">
+            <span>📂 Carpetas en /DCIM/</span>
+            <span class="current-tag" id="tagFolderCount">0 carpetas</span>
+          </div>
+          <div id="folderListBox" style="display:flex; flex-direction:column; gap:6px;"></div>
+        </div>
+
+        <!-- Contenido de la Carpeta Seleccionada -->
+        <div class="submode-box" style="max-height:360px; overflow-y:auto;">
+          <div class="control-label" style="flex-wrap:wrap; gap:8px;">
+            <span id="selectedFolderTitle">📄 Selecciona una carpeta a la izquierda para ver sus fotos/videos</span>
+            <div id="folderActionsBar" class="hidden" style="display:flex; gap:8px;">
+              <button class="primary" onclick="downloadCurrentFolder()" style="padding:5px 10px; font-size:12px;">
+                📥 Guardar Carpeta en Mac...
+              </button>
+              <button class="danger" onclick="deleteCurrentFolder()" style="padding:5px 10px; font-size:12px;">
+                🗑️ Borrar Carpeta Completa
+              </button>
+            </div>
+          </div>
+          <div id="fileListBox" style="display:flex; flex-direction:column; gap:6px;">
+            <div style="color:var(--muted); font-size:13px; padding:12px 0;">
+              Haz clic en cualquiera de las carpetas de fecha (ej. <b>20261105</b>) para listar sus fotos/videos, verlas en 360°, elegir dónde descargarlas o eliminarlas de la microSD.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HERRAMIENTA LOCAL EN MAC: PROCESAR CARPETAS Y CORREGIR FECHAS EXIF (Punto 4) -->
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap; gap:12px;">
+        <div>
+          <h2>💻 Procesador Local en Mac (Cosido 360° y Fechas EXIF en la carpeta que elijas)</h2>
+          <div style="font-size:12px; color:var(--muted); margin-top:4px;">
+            Carpeta actual en Mac: <code id="activeWorkDirLabel" style="color:#34d399;">Descargas/</code> — Cose fotos de 2 esferas o inyecta XMP <code style="color:#34d399;">GPano</code>, y corrige fechas/horas desfasadas en nombres, EXIF y Finder.
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button onclick="chooseLocalWorkDir()">📂 Elegir Carpeta en Mac...</button>
+          <button onclick="loadLocalFolders()">🔄 Refrescar</button>
+          <button class="primary" onclick="stitchLocalFolder('ALL')">🌐 Procesar 360° en Todas...</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+        <!-- Columna 1: Carpetas locales y estado de cosido 360 -->
+        <div class="submode-box" style="max-height:340px; overflow-y:auto;">
+          <div class="control-label">
+            <span>📂 Carpetas en la ruta seleccionada</span>
+            <span class="current-tag" id="tagLocalFolderCount">0 carpetas</span>
+          </div>
+          <div id="localFolderListBox" style="display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+
+        <!-- Columna 2: Reparador de Fechas y EXIF por Foto de Referencia -->
+        <div class="submode-box">
+          <div class="control-label">
+            <span>🕒 Corregir Fechas (Carpetas + Nombres + EXIF + Finder)</span>
+          </div>
+          <div style="font-size:12px; color:var(--muted); line-height:1.45;">
+            Si tomaste fotos con el reloj de la cámara reiniciado (ej. <code style="color:#f87171;">20140105</code>), marca las carpetas a corregir, indica una foto de referencia y la fecha/hora real en que la tomaste:
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
+            <label style="font-size:12px; color:#cbd5e1; font-weight:600;">
+              1. Carpetas seleccionadas para corregir fecha (clic en la lista izquierda para agregar/quitar):
+            </label>
+            <input id="fixFoldersInput" type="text" placeholder="Ej: 20140105, 20140106"
+              style="background:#151821; border:1px solid var(--border); color:#fff; padding:8px 10px; border-radius:8px; font-size:12.5px;" />
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <label style="font-size:12px; color:#cbd5e1; font-weight:600;">2. Foto de referencia:</label>
+                <input id="fixRefPhotoInput" type="text" placeholder="IMG_20140105_120341.JPG"
+                  style="background:#151821; border:1px solid var(--border); color:#fff; padding:8px 10px; border-radius:8px; font-size:12.5px;" />
+              </div>
+              <div style="display:flex; flex-direction:column; gap:4px;">
+                <label style="font-size:12px; color:#cbd5e1; font-weight:600;">3. Fecha y hora real (AAAA-MM-DD HH:MM):</label>
+                <input id="fixRealDateInput" type="text" placeholder="2026-10-22 15:48"
+                  style="background:#151821; border:1px solid var(--border); color:#fff; padding:8px 10px; border-radius:8px; font-size:12.5px;" />
+              </div>
+            </div>
+
+            <button class="primary" onclick="runLocalDateFix()" style="margin-top:4px;">
+              🕒 Calcular Desfase y Corregir Nombres + EXIF
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL VISOR INTERACTIVO 360° (WebGL 100% Offline) -->
+  <div id="viewer360Modal" class="viewer360-modal hidden">
+    <div class="viewer360-topbar">
+      <div class="viewer360-title">
+        <span style="background:var(--accent); color:#fff; padding:3px 9px; border-radius:6px; font-size:12px;">360°</span>
+        <span id="viewer360FileTitle">IMG_360.JPG</span>
+        <span id="viewer360Counter" style="color:var(--muted); font-size:12px; font-weight:500;"></span>
+      </div>
+
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button id="btn360Prev" onclick="step360Viewer(-1)" style="padding:6px 10px; font-size:12px;">◀ Anterior</button>
+        <button id="btn360Next" onclick="step360Viewer(1)" style="padding:6px 10px; font-size:12px;">Siguiente ▶</button>
+        <button id="btn360ToggleFlat" onclick="toggle360FlatMode()" style="padding:6px 10px; font-size:12px;">🖼️ Ver Plano 2D</button>
+        <button id="btn360AutoRotate" onclick="toggle360AutoRotate()" style="padding:6px 10px; font-size:12px;">🔄 Auto-Giro</button>
+        <button onclick="reset360CameraView()" style="padding:6px 10px; font-size:12px;">🎯 Centrar</button>
+        <button onclick="toggle360Fullscreen()" style="padding:6px 10px; font-size:12px;">⛶ Pantalla Completa</button>
+        <button id="btn360Download" class="primary" onclick="downloadCurrent360Slide()" style="padding:6px 11px; font-size:12px;">
+          ⬇️ Guardar 360° en Mac...
+        </button>
+        <button class="danger" onclick="close360Viewer()" style="padding:6px 11px; font-size:12px;">✖ Cerrar (Esc)</button>
+      </div>
+    </div>
+
+    <div class="viewer360-stage" id="viewer360Stage">
+      <canvas id="viewer360Canvas"></canvas>
+      <img id="viewer360FlatImg" class="hidden" alt="Vista Plana Equirectangular" />
+      <div id="viewer360Loader" class="viewer360-loader">
+        <div style="font-size:28px;">🌐</div>
+        <div id="viewer360LoaderText">Cosiendo y cargando esfera 360°...</div>
+      </div>
+      <div class="viewer360-hint" id="viewer360Hint">
+        🖱️ Arrastra para girar 360° • Rueda/Trackpad para Zoom • Teclas ◀ ▶ para cambiar de foto
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    let currentState = null;
+    let isRecording = false;
+    let selectedFolder = null;
+    let lastFolderListSig = "";
+
+    function showToast(msg, isError = false) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.style.borderColor = isError ? "#ef4444" : "#ff6700";
+      el.style.display = "block";
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => {
+        el.style.display = "none";
+      }, 3200);
+    }
+
+    async function apiCall(path, method = "GET", body = null) {
+      const opts = { method, headers: { "Content-Type": "application/json" } };
+      if (body) opts.body = JSON.stringify(body);
+      const res = await fetch(path, opts);
+      return await res.json();
+    }
+
+    async function loadStatus() {
+      try {
+        const data = await apiCall("/api/status");
+        if (data.ok && data.status) {
+          renderState(data.status);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function connectCamera() {
+      showToast("Conectando a 192.168.42.1:7878 y sincronizando reloj...");
+      const data = await apiCall("/api/connect", "POST", { sync_clock: true });
+      if (data.ok) {
+        renderState(data.status);
+        showToast("✅ ¡Conectado a tu Mi Sphere 360 y fecha actualizada!");
+      } else {
+        if (data.status) renderState(data.status);
+        showToast("❌ No se pudo conectar: asegúrate de estar en el Wi-Fi MJXJ-010135", true);
+      }
+    }
+
+    async function disconnectCamera() {
+      const data = await apiCall("/api/disconnect", "POST");
+      if (data.status) renderState(data.status);
+      showToast("👋 Sesión TCP cerrada limpiamente.");
+    }
+
+    async function refreshCamera() {
+      const data = await apiCall("/api/refresh", "POST");
+      if (data.ok) {
+        renderState(data.status);
+        showToast("🔄 Estado actualizado desde la cámara.");
+      } else {
+        showToast("⚠️ " + (data.error || "Error al refrescar"), true);
+      }
+    }
+
+    async function sendCmd(action, param = null) {
+      try {
+        const data = await apiCall("/api/command", "POST", { action, param });
+        if (data.ok) {
+          renderState(data.status);
+          showToast(`✅ Comando enviado: ${action}` + (param !== null ? ` (${param})` : ""));
+        } else {
+          if (data.status) renderState(data.status);
+          showToast(`❌ Error (${action}): ${data.error}`, true);
+        }
+      } catch (e) {
+        showToast("❌ Error de red con el servidor local", true);
+      }
+    }
+
+    function switchMode(modeId) {
+      sendCmd("switch_mode", modeId);
+    }
+
+    async function resetPhotoSubmodes() {
+      await sendCmd("photo_timer", 0);
+      await sendCmd("photo_interval", 0);
+      await sendCmd("photo_bracketing", 0);
+    }
+
+    async function resetVideoSubmodes() {
+      await sendCmd("video_short", 0);
+      await sendCmd("video_timelapse", 0);
+      await sendCmd("video_slowmo", 0);
+    }
+
+    let countdownInterval = null;
+
+    function startVisualCountdown(seconds) {
+      clearInterval(countdownInterval);
+      let rem = seconds;
+      const hint = document.getElementById("shutterHint");
+      hint.textContent = `⏱️ Cuenta regresiva en cámara: ${rem}s...`;
+      countdownInterval = setInterval(() => {
+        rem -= 1;
+        if (rem > 0) {
+          hint.textContent = `⏱️ Cuenta regresiva en cámara: ${rem}s...`;
+        } else {
+          clearInterval(countdownInterval);
+          countdownInterval = null;
+          hint.textContent = "📸 ¡Capturando y guardando foto en microSD!";
+        }
+      }, 1000);
+    }
+
+    function triggerPrimaryShutter() {
+      const mode = currentState?.current?.mode ?? 1;
+      const subMode = currentState?.current?.sub_mode ?? 0;
+      if (mode === 1) {
+        if (subMode === 1) {
+          const sec = currentState?.current?.photo?.timer_sec || 3;
+          startVisualCountdown(sec);
+          sendCmd("photo_shutter_long");
+        } else if (subMode === 2 || subMode === 4) {
+          sendCmd("photo_shutter_long");
+        } else {
+          sendCmd("photo_shutter_press");
+        }
+      } else {
+        if (!isRecording) {
+          isRecording = true;
+          sendCmd(subMode > 0 ? "video_long" : "video_start");
+        } else {
+          isRecording = false;
+          sendCmd("video_stop");
+        }
+      }
+    }
+
+    function confirmPowerOff() {
+      if (confirm("¿Seguro que deseas apagar la cámara Xiaomi Mi Sphere 360?")) {
+        sendCmd("power_off");
+      }
+    }
+
+    function formatDuration(sec) {
+      if (!sec) return "0m";
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+
+    function renderButtons(containerId, items, activeValue, onClickFn) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = "";
+      items.forEach(item => {
+        const btn = document.createElement("button");
+        btn.className = "pill-btn" + (item.value === activeValue ? " active" : "");
+        btn.textContent = item.label;
+        btn.onclick = () => onClickFn(item.value);
+        container.appendChild(btn);
+      });
+    }
+
+    function renderState(st) {
+      currentState = st;
+
+      // Conexión
+      const badge = document.getElementById("connBadge");
+      const connText = document.getElementById("connText");
+      const ipNote = st.local_ip ? ` • IP Mac: ${st.local_ip}` : "";
+      if (st.connected) {
+        badge.className = "badge online";
+        connText.textContent = `Conectado en Vivo (Token #${st.token}${ipNote})`;
+      } else {
+        badge.className = "badge offline";
+        const waitingCamera = st.local_ip && st.local_ip.startsWith("192.168.42.");
+        connText.textContent = waitingCamera
+          ? `En red de cámara (${st.local_ip}) — Conectando TCP...`
+          : `Esperando Wi-Fi MJXJ-010135 (Mostrando último estado${ipNote})`;
+      }
+
+      document.getElementById("camSerial").textContent = `${st.product} • SN: ${st.serial}`;
+
+      // Telemetría
+      const batt = st.battery || {};
+      document.getElementById("statBattery").textContent =
+        `${batt.percent ?? "--"}%` + (batt.charging ? " ⚡ (Cargando)" : "");
+      document.getElementById("statStorage").textContent =
+        `${st.storage.sd_free_gb} GB / ${st.storage.sd_total_gb} GB`;
+      document.getElementById("statPhotos").textContent =
+        `${st.storage.remain_jpg} fotos (${st.storage.cam_jpg} guardadas)`;
+      document.getElementById("statVideo").textContent =
+        `${formatDuration(st.storage.remain_video_sec)} (${st.storage.cam_mp4} clips)`;
+
+      // Modo Foto (1) vs Video (0)
+      const mode = st.current.mode;
+      const subMode = st.current.sub_mode;
+      const isPhoto = mode === 1;
+      document.getElementById("tabPhoto").className = "mode-tab" + (isPhoto ? " active" : "");
+      document.getElementById("tabVideo").className = "mode-tab" + (!isPhoto ? " active" : "");
+      document.getElementById("photoPanel").classList.toggle("hidden", !isPhoto);
+      document.getElementById("videoPanel").classList.toggle("hidden", isPhoto);
+
+      const shutterBtn = document.getElementById("mainShutterBtn");
+      const shutterHint = document.getElementById("shutterHint");
+      const btnSecondary = document.getElementById("btnSecondaryShutter");
+      const btnStopVideo = document.getElementById("btnStopVideo");
+
+      if (isPhoto) {
+        shutterBtn.className = "shutter-ring";
+        if (!countdownInterval) {
+          if (subMode === 1) {
+            shutterHint.textContent = `⏱️ Toca para Disparar con Timer de ${st.current.photo.timer_sec}s (4868)`;
+          } else if (subMode === 2) {
+            shutterHint.textContent = `🔁 Toca para Iniciar Intervalómetro cada ${st.current.photo.interval_sec}s (4868)`;
+          } else if (subMode === 4) {
+            shutterHint.textContent = `🌗 Toca para Disparar Bracketing AEB (4868)`;
+          } else {
+            shutterHint.textContent = "📸 Toca para Disparar Foto Inmediata (4864)";
+          }
+        }
+        document.getElementById("activeModeLabel").textContent = "Modo Foto Activo";
+        btnSecondary.classList.add("hidden");
+        btnStopVideo.classList.add("hidden");
+      } else {
+        shutterBtn.className = "shutter-ring video-mode" + (isRecording ? " recording" : "");
+        shutterHint.textContent = isRecording
+          ? "Grabando... Toca para Detener (msg_id: 514)"
+          : subMode > 0
+          ? "🎬 Toca para Grabar con Modo Especial (msg_id: 4623)"
+          : "🎥 Toca para Iniciar Grabación (msg_id: 5028)";
+        document.getElementById("activeModeLabel").textContent = "Modo Video Activo";
+        btnSecondary.classList.add("hidden");
+        btnStopVideo.classList.remove("hidden");
+      }
+
+      // Controles de Foto
+      const p = st.current.photo;
+      const opts = st.options;
+
+      const activePhotoRes = opts.photo_res.find(o => o.id === p.p_res)?.label || p.p_res;
+      document.getElementById("tagPhotoRes").textContent = activePhotoRes;
+      renderButtons(
+        "photoResGrid",
+        opts.photo_res.map(o => ({ value: o.id, label: o.label })),
+        p.p_res,
+        val => sendCmd("photo_res", val)
+      );
+
+      document.getElementById("tagPhotoIso").textContent = p.iso === 0 ? "Auto" : `ISO ${p.iso}`;
+      renderButtons(
+        "photoIsoGrid",
+        opts.iso.map(o => ({ value: o.id, label: o.label })),
+        p.iso,
+        val => sendCmd("photo_iso", val)
+      );
+
+      document.getElementById("tagPhotoShutter").textContent =
+        p.shutter_str === "Auto" ? "Auto" : `${p.shutter_str} s`;
+      renderButtons(
+        "photoShutterGrid",
+        opts.shutter.map(o => ({ value: o.code, label: o.label })),
+        p.shutter_str,
+        val => sendCmd("photo_shutter", val)
+      );
+
+      const activePhotoWb = opts.wb.find(o => o.id === p.wb)?.label || p.wb;
+      document.getElementById("tagPhotoWb").textContent = activePhotoWb;
+      renderButtons(
+        "photoWbGrid",
+        opts.wb.map(o => ({ value: o.id, label: o.label })),
+        p.wb,
+        val => sendCmd("photo_wb", val)
+      );
+
+      document.getElementById("tagPhotoEv").textContent = `${p.ev >= 0 ? "+" : ""}${p.ev.toFixed(1)} EV`;
+      renderButtons(
+        "photoEvGrid",
+        opts.ev.map(o => ({ value: o.id, label: o.label })),
+        p.ev_raw,
+        val => sendCmd("photo_ev", val)
+      );
+
+      // Sub-modos Foto
+      const activeTimer = subMode === 1 ? p.timer_sec : 0;
+      document.getElementById("tagTimer").textContent = activeTimer ? `${activeTimer} s` : "Off";
+      renderButtons(
+        "photoTimerGrid",
+        opts.timer.map(s => ({ value: s, label: s === 0 ? "Off" : `${s} s` })),
+        activeTimer,
+        val => sendCmd("photo_timer", val)
+      );
+
+      const activeInterval = subMode === 2 ? p.interval_sec : 0;
+      document.getElementById("tagInterval").textContent = activeInterval ? `Cada ${activeInterval} s` : "Off";
+      renderButtons(
+        "photoIntervalGrid",
+        opts.interval.map(s => ({ value: s, label: s === 0 ? "Off" : `${s} s` })),
+        activeInterval,
+        val => sendCmd("photo_interval", val)
+      );
+
+      const activeBracketing = subMode === 4 ? p.bracketing_raw : 0;
+      document.getElementById("tagBracketing").textContent =
+        opts.bracketing.find(b => b.raw === activeBracketing)?.label || "Off";
+      renderButtons(
+        "photoBracketingGrid",
+        opts.bracketing.map(b => ({ value: b.raw, label: b.label })),
+        activeBracketing,
+        val => sendCmd("photo_bracketing", val)
+      );
+
+      // Controles de Video
+      const v = st.current.video;
+      const activeVideoRes = opts.video_res.find(o => o.id === v.v_res)?.label || v.v_res;
+      document.getElementById("tagVideoRes").textContent = activeVideoRes;
+      renderButtons(
+        "videoResGrid",
+        opts.video_res.map(o => ({ value: o.id, label: o.label })),
+        v.v_res,
+        val => sendCmd("video_res", val)
+      );
+
+      const activeVideoWb = opts.wb.find(o => o.id === v.wb)?.label || v.wb;
+      document.getElementById("tagVideoWb").textContent = activeVideoWb;
+      renderButtons(
+        "videoWbGrid",
+        opts.wb.map(o => ({ value: o.id, label: o.label })),
+        v.wb,
+        val => sendCmd("video_wb", val)
+      );
+
+      document.getElementById("tagVideoEv").textContent = `${v.ev >= 0 ? "+" : ""}${v.ev.toFixed(1)} EV`;
+      renderButtons(
+        "videoEvGrid",
+        opts.ev.map(o => ({ value: o.id, label: o.label })),
+        v.ev_raw,
+        val => sendCmd("video_ev", val)
+      );
+
+      // Sub-modos Video
+      const activeShort = !isPhoto && subMode === 1 ? v.short_sec : 0;
+      document.getElementById("tagShortVideo").textContent = activeShort ? `${activeShort} s` : "Off";
+      renderButtons(
+        "videoShortGrid",
+        opts.short_video.map(s => ({ value: s, label: s === 0 ? "Off" : `${s} s` })),
+        activeShort,
+        val => sendCmd("video_short", val)
+      );
+
+      const activeLapse = !isPhoto && subMode === 2 ? v.timelapse_sec : 0;
+      document.getElementById("tagTimelapse").textContent =
+        opts.timelapse.find(t => t.raw === activeLapse)?.label || "Off";
+      renderButtons(
+        "videoTimelapseGrid",
+        opts.timelapse.map(t => ({ value: t.raw, label: t.label })),
+        activeLapse,
+        val => sendCmd("video_timelapse", val)
+      );
+
+      const activeSlow = !isPhoto && subMode === 4 ? v.slowmo_rate : 0;
+      document.getElementById("tagSlowmo").textContent = activeSlow ? `${activeSlow}x` : "Off";
+      renderButtons(
+        "videoSlowmoGrid",
+        opts.slowmo.map(s => ({ value: s.raw, label: s.label })),
+        activeSlow,
+        val => sendCmd("video_slowmo", val)
+      );
+
+      // Sistema
+      const sys = st.current.system;
+      document.getElementById("tagBuzzer").textContent = sys.buzzer === 0 ? "Silencio" : `Nivel ${sys.buzzer}`;
+      renderButtons(
+        "sysBuzzerGrid",
+        [0, 1, 2, 3, 4].map(n => ({ value: n, label: n === 0 ? "Mute" : `${n * 25}%` })),
+        sys.buzzer,
+        val => sendCmd("buzzer", val)
+      );
+
+      document.getElementById("tagLed").textContent = sys.led ? "Encendido" : "Apagado";
+      document.getElementById("btnLed1").className = "pill-btn" + (sys.led === 1 ? " active" : "");
+      document.getElementById("btnLed0").className = "pill-btn" + (sys.led === 0 ? " active" : "");
+
+      // Carpetas DCIM
+      renderFolderList(st.dcim_folders || []);
+
+      // Consola de Logs
+      const logBox = document.getElementById("logBox");
+      logBox.innerHTML = "";
+      (st.logs || []).slice().reverse().forEach(entry => {
+        const div = document.createElement("div");
+        div.className = `log-entry ${entry.dir}`;
+        const arrow = entry.dir === "OUT"
+          ? "➡️ ENVÍO"
+          : entry.dir === "IN"
+          ? "⬅️ CÁMARA"
+          : entry.dir === "INFO"
+          ? "ℹ️ INFO"
+          : "⚠️ ERROR";
+        div.textContent = `[${entry.time}] ${arrow}: ${JSON.stringify(entry.data)}`;
+        logBox.appendChild(div);
+      });
+    }
+
+    function renderFolderList(folders) {
+      document.getElementById("tagFolderCount").textContent = `${folders.length} carpetas`;
+      const sig = JSON.stringify({ folders, selectedFolder });
+      if (sig === lastFolderListSig) return;
+      lastFolderListSig = sig;
+
+      const box = document.getElementById("folderListBox");
+      box.innerHTML = "";
+      if (!folders.length) {
+        box.innerHTML = `<div style="color:var(--muted); font-size:12.5px;">No hay carpetas en DCIM.</div>`;
+        return;
+      }
+
+      folders.forEach(folder => {
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.gap = "6px";
+        row.style.alignItems = "center";
+
+        const btn = document.createElement("button");
+        btn.className = "pill-btn" + (selectedFolder === folder ? " active" : "");
+        btn.style.flex = "1";
+        btn.style.textAlign = "left";
+        btn.style.display = "flex";
+        btn.style.justifyContent = "space-between";
+        const dateFormatted = folder.length === 8
+          ? `${folder.slice(0,4)}-${folder.slice(4,6)}-${folder.slice(6,8)}`
+          : folder;
+        btn.innerHTML = `<span>📁 <b>${folder}</b></span><span style="opacity:0.75; font-size:11px;">${dateFormatted}</span>`;
+        btn.onclick = () => selectFolder(folder);
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "danger";
+        delBtn.style.padding = "6px 9px";
+        delBtn.style.fontSize = "11.5px";
+        delBtn.title = `Borrar toda la carpeta ${folder}`;
+        delBtn.textContent = "🗑️";
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          deleteFolderByName(folder);
+        };
+
+        row.appendChild(btn);
+        row.appendChild(delBtn);
+        box.appendChild(row);
+      });
+    }
+
+    async function refreshFoldersFromCamera() {
+      showToast("📂 Leyendo carpetas de /tmp/SD0/DCIM/...");
+      try {
+        const data = await apiCall("/api/files");
+        if (data.ok) {
+          await loadStatus();
+          if (selectedFolder) {
+            await selectFolder(selectedFolder);
+          }
+          showToast("✅ Lista de carpetas actualizada desde la microSD.");
+        } else {
+          showToast("❌ No se pudo listar DCIM: " + (data.error || ""), true);
+        }
+      } catch (e) {
+        showToast("❌ Error al consultar carpetas", true);
+      }
+    }
+
+    async function selectFolder(folder) {
+      selectedFolder = folder;
+      lastFolderListSig = "";
+      if (currentState) renderFolderList(currentState.dcim_folders || []);
+
+      document.getElementById("selectedFolderTitle").innerHTML =
+        `📂 Carpeta seleccionada: <b style="color:#fff;">/DCIM/${folder}/</b>`;
+      document.getElementById("folderActionsBar").classList.remove("hidden");
+
+      const fileBox = document.getElementById("fileListBox");
+      fileBox.innerHTML = `<div style="color:var(--muted); font-size:13px; padding:10px 0;">⏳ Consultando archivos de <b>${folder}</b> en la cámara...</div>`;
+
+      try {
+        const data = await apiCall(`/api/files?folder=${encodeURIComponent(folder)}`);
+        if (data.ok) {
+          renderFileList(folder, data.items || []);
+        } else {
+          fileBox.innerHTML = `<div style="color:var(--danger); font-size:13px;">❌ Error: ${data.error || "Conéctate al Wi-Fi de la cámara para listar sus archivos."}</div>`;
+        }
+      } catch (e) {
+        fileBox.innerHTML = `<div style="color:var(--danger); font-size:13px;">❌ Error al consultar la carpeta.</div>`;
+      }
+    }
+
+    let sdStitchMode = "360";
+    let selectedFixFolders = new Set();
+
+    function setSdStitchMode(mode) {
+      sdStitchMode = mode;
+      document.getElementById("btnMode360").className = "pill-btn" + (mode === "360" ? " active" : "");
+      document.getElementById("btnModeBoth").className = "pill-btn" + (mode === "both" ? " active" : "");
+      document.getElementById("btnModeRaw").className = "pill-btn" + (mode === "raw" ? " active" : "");
+    }
+
+    function renderFileList(folder, items) {
+      const fileBox = document.getElementById("fileListBox");
+      fileBox.innerHTML = "";
+      const files = items.filter(i => !i.is_dir);
+
+      document.getElementById("selectedFolderTitle").innerHTML =
+        `📂 Carpeta <b style="color:#fff;">/DCIM/${folder}/</b> (${files.length} archivos)`;
+
+      if (!files.length) {
+        fileBox.innerHTML = `<div style="color:var(--muted); font-size:13px; padding:10px 0;">Esta carpeta está vacía en la tarjeta microSD.</div>`;
+        return;
+      }
+
+      const orderedFiles = files.slice().reverse();
+      const photoList = orderedFiles
+        .filter(x => x.name.toUpperCase().endsWith(".JPG"))
+        .map(x => ({
+          title: x.name.replace(/\.jpg$/i, "_360.JPG"),
+          source: "sd",
+          folder: folder,
+          filename: x.name,
+          viewUrl: `/api/media?path=${encodeURIComponent(folder + "/" + x.name)}&stitch=1`,
+          dlUrl: `/api/media?path=${encodeURIComponent(folder + "/" + x.name)}&stitch=1&download=1`,
+        }));
+
+      orderedFiles.forEach(f => {
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.justifyContent = "space-between";
+        row.style.alignItems = "center";
+        row.style.padding = "8px 12px";
+        row.style.background = "#181d2a";
+        row.style.border = "1px solid #2b3245";
+        row.style.borderRadius = "8px";
+        row.style.gap = "10px";
+        row.style.flexWrap = "wrap";
+
+        const isVideo = f.name.toUpperCase().endsWith(".MP4");
+        const isPhoto = f.name.toUpperCase().endsWith(".JPG");
+        const icon = isVideo ? "🎬" : "🖼️";
+        const relPath = encodeURIComponent(folder + "/" + f.name);
+        const rawViewUrl = `/api/media?path=${relPath}`;
+        const name360 = isPhoto ? f.name.replace(/\.jpg$/i, "_360.JPG") : f.name;
+
+        const left = document.createElement("div");
+        left.style.display = "flex";
+        left.style.flexDirection = "column";
+        left.style.gap = "2px";
+        left.innerHTML = `
+          <span style="font-size:13px; font-weight:600; color:#f1f5f9;">${icon} ${f.name}</span>
+          <span style="font-size:11px; color:var(--muted);">Fecha cámara: ${f.date || "--"}</span>
+        `;
+
+        const right = document.createElement("div");
+        right.style.display = "flex";
+        right.style.gap = "6px";
+        right.style.alignItems = "center";
+        right.style.flexWrap = "wrap";
+
+        if (isPhoto) {
+          // Botón Ver 360° Interactivo en Esfera WebGL
+          const view360Btn = document.createElement("button");
+          view360Btn.className = "primary";
+          view360Btn.style.padding = "5px 9px";
+          view360Btn.style.fontSize = "11.5px";
+          view360Btn.textContent = "🌐 Ver 360°";
+          view360Btn.onclick = () => {
+            const pIdx = photoList.findIndex(p => p.title === name360);
+            open360Viewer(photoList, pIdx >= 0 ? pIdx : 0);
+          };
+
+          // Botón Guardar 360° eligiendo carpeta en Finder
+          const dl360Btn = document.createElement("button");
+          dl360Btn.style.padding = "5px 9px";
+          dl360Btn.style.fontSize = "11.5px";
+          dl360Btn.style.borderColor = "#ff6700";
+          dl360Btn.style.color = "#ff984f";
+          dl360Btn.textContent = "⬇️ 360°...";
+          dl360Btn.title = "Elegir dónde guardar la foto 360° en tu Mac";
+          dl360Btn.onclick = () => saveSingleFileWithDialog("sd", folder, f.name, true);
+
+          // Botón Ver Original sin procesar
+          const viewRawLink = document.createElement("a");
+          viewRawLink.href = rawViewUrl;
+          viewRawLink.target = "_blank";
+          viewRawLink.style.textDecoration = "none";
+          viewRawLink.innerHTML = `<button style="padding:5px 8px; font-size:11px; opacity:0.85;" title="Ver archivo original de la cámara">👁️ Orig.</button>`;
+
+          // Botón Guardar Original eligiendo carpeta en Finder
+          const dlRawBtn = document.createElement("button");
+          dlRawBtn.style.padding = "5px 8px";
+          dlRawBtn.style.fontSize = "11px";
+          dlRawBtn.style.opacity = "0.85";
+          dlRawBtn.title = "Elegir dónde guardar el archivo original sin coser";
+          dlRawBtn.textContent = "⬇️ Orig...";
+          dlRawBtn.onclick = () => saveSingleFileWithDialog("sd", folder, f.name, false);
+
+          right.appendChild(view360Btn);
+          right.appendChild(dl360Btn);
+          right.appendChild(viewRawLink);
+          right.appendChild(dlRawBtn);
+        } else {
+          const viewLink = document.createElement("a");
+          viewLink.href = rawViewUrl;
+          viewLink.target = "_blank";
+          viewLink.style.textDecoration = "none";
+          viewLink.innerHTML = `<button style="padding:5px 10px; font-size:11.5px;">👁️ Ver</button>`;
+
+          const dlBtn = document.createElement("button");
+          dlBtn.style.padding = "5px 10px";
+          dlBtn.style.fontSize = "11.5px";
+          dlBtn.textContent = "⬇️ Guardar...";
+          dlBtn.onclick = () => saveSingleFileWithDialog("sd", folder, f.name, false);
+
+          right.appendChild(viewLink);
+          right.appendChild(dlBtn);
+        }
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "danger";
+        delBtn.style.padding = "5px 10px";
+        delBtn.style.fontSize = "11.5px";
+        delBtn.textContent = "🗑️ Borrar";
+        delBtn.onclick = () => deleteSingleFile(folder, f.name);
+
+        right.appendChild(delBtn);
+
+        row.appendChild(left);
+        row.appendChild(right);
+        fileBox.appendChild(row);
+      });
+    }
+
+    async function saveSingleFileWithDialog(source, folder, filename, doStitch) {
+      showToast(`📂 Elige en la ventana de Finder dónde guardar ${filename}...`);
+      try {
+        const data = await apiCall("/api/save_file_dialog", "POST", {
+          source,
+          folder,
+          filename,
+          stitch: doStitch,
+        });
+        if (data.cancelled) {
+          showToast("ℹ️ Guardado cancelado.");
+          return;
+        }
+        if (data.ok) {
+          showToast(`✅ Guardado en: ${data.saved_path}`);
+          loadLocalFolders();
+        } else {
+          showToast(`❌ Error al guardar: ${data.error}`, true);
+        }
+      } catch (e) {
+        showToast("❌ Error al guardar el archivo", true);
+      }
+    }
+
+    async function deleteSingleFile(folder, filename) {
+      if (!confirm(`¿Borrar definitivamente el archivo ${filename} de la carpeta ${folder} en la microSD?`)) {
+        return;
+      }
+      showToast(`🗑️ Borrando ${filename}...`);
+      const data = await apiCall("/api/delete_file", "POST", { folder, filename });
+      if (data.ok) {
+        if (data.status) renderState(data.status);
+        if (data.files) renderFileList(folder, data.files.items || []);
+        showToast(`✅ Archivo ${filename} eliminado de la microSD.`);
+      } else {
+        showToast(`❌ Error al borrar ${filename}: ${data.error}`, true);
+      }
+    }
+
+    async function deleteCurrentFolder() {
+      if (!selectedFolder) return;
+      await deleteFolderByName(selectedFolder);
+    }
+
+    async function deleteFolderByName(folder) {
+      if (!confirm(`⚠️ ¿Seguro que deseas BORRAR TODA LA CARPETA "${folder}" y todas las fotos/videos dentro de ella en la microSD?`)) {
+        return;
+      }
+      showToast(`🗑️ Borrando todos los archivos de la carpeta ${folder}...`);
+      const data = await apiCall("/api/delete_folder", "POST", { folder });
+      if (data.ok) {
+        if (selectedFolder === folder) {
+          selectedFolder = null;
+          document.getElementById("selectedFolderTitle").textContent =
+            "📄 Selecciona una carpeta a la izquierda para ver sus fotos/videos";
+          document.getElementById("folderActionsBar").classList.add("hidden");
+          document.getElementById("fileListBox").innerHTML =
+            `<div style="color:#34d399; font-size:13px; padding:12px 0;">✅ Carpeta <b>${folder}</b> eliminada (${data.deleted_files} archivos borrados).</div>`;
+        }
+        lastFolderListSig = "";
+        if (data.status) renderState(data.status);
+        showToast(`✅ Carpeta ${folder} eliminada (${data.deleted_files} archivos borrados).`);
+      } else {
+        showToast(`❌ Error al borrar carpeta ${folder}: ${data.error}`, true);
+      }
+    }
+
+    async function downloadCurrentFolder() {
+      if (!selectedFolder) return;
+      const folder = selectedFolder;
+      const modeDesc = sdStitchMode === "360"
+        ? "solo versión 360°"
+        : sdStitchMode === "both"
+        ? "original + 360°"
+        : "solo original";
+      showToast(`📂 Elige en la ventana de Finder dónde guardar la carpeta ${folder} (${modeDesc})...`);
+      const data = await apiCall("/api/download_folder", "POST", { folder, stitch_mode: sdStitchMode });
+      if (data.cancelled) {
+        showToast("ℹ️ Guardado de carpeta cancelado.");
+        return;
+      }
+      if (data.ok && data.downloaded && data.downloaded.length > 0) {
+        const stCount = data.stitched_360 ? data.stitched_360.length : 0;
+        showToast(`✅ ${data.downloaded.length} archivos guardados (${stCount} listas en 360°) en ${data.dest_dir}`);
+        loadLocalFolders();
+      } else if (data.ok && (!data.downloaded || data.downloaded.length === 0)) {
+        const firstErr = data.errors && data.errors.length ? JSON.stringify(data.errors[0]) : "Carpeta vacía o sin respuesta HTTP";
+        showToast(`❌ No se descargó ningún archivo: ${firstErr}`, true);
+      } else {
+        showToast(`❌ Error al descargar carpeta: ${data.error}`, true);
+      }
+    }
+
+    async function chooseLocalWorkDir() {
+      showToast("📂 Selecciona en Finder la carpeta de tu Mac con tus fotos/carpetas 360°...");
+      const data = await apiCall("/api/choose_local_dir", "POST");
+      if (data.cancelled) {
+        showToast("ℹ️ Selección de carpeta cancelada.");
+        return;
+      }
+      if (data.ok) {
+        selectedFixFolders.clear();
+        document.getElementById("fixFoldersInput").value = "";
+        showToast(`✅ Carpeta activa: ${data.local_work_dir}`);
+        loadLocalFolders();
+      }
+    }
+
+    async function loadLocalFolders() {
+      try {
+        const data = await apiCall("/api/local_folders");
+        if (!data.ok) return;
+        if (data.work_dir) {
+          document.getElementById("activeWorkDirLabel").textContent = data.work_dir;
+        }
+        const folders = data.folders || [];
+        document.getElementById("tagLocalFolderCount").textContent = `${folders.length} carpetas`;
+        const box = document.getElementById("localFolderListBox");
+        box.innerHTML = "";
+        if (!folders.length) {
+          box.innerHTML = `<div style="color:var(--muted); font-size:12.5px;">No se encontraron fotos .JPG ni subcarpetas en esta ruta. Usa <b>📂 Elegir Carpeta en Mac...</b> para abrir otra ubicación.</div>`;
+          return;
+        }
+
+        folders.forEach(f => {
+          const row = document.createElement("div");
+          row.style.display = "flex";
+          row.style.justifyContent = "space-between";
+          row.style.alignItems = "center";
+          row.style.padding = "8px 10px";
+          row.style.background = "#181d2a";
+          row.style.border = "1px solid #2b3245";
+          row.style.borderRadius = "8px";
+          row.style.gap = "8px";
+          row.style.flexWrap = "wrap";
+
+          const isSelectedForFix = selectedFixFolders.has(f.name);
+
+          const leftBtn = document.createElement("button");
+          leftBtn.className = "pill-btn" + (isSelectedForFix ? " active" : "");
+          leftBtn.style.flex = "1";
+          leftBtn.style.textAlign = "left";
+          leftBtn.style.display = "flex";
+          leftBtn.style.justifyContent = "space-between";
+          leftBtn.style.alignItems = "center";
+          leftBtn.innerHTML = `
+            <span>📁 <b>${f.label}</b></span>
+            <span style="font-size:11px; opacity:0.85;">
+              ${f.raw_count} orig • <b style="color:#34d399;">${f.stitched_count} en 360°</b>${f.video_count ? ` • ${f.video_count} MP4` : ""}
+            </span>
+          `;
+          leftBtn.onclick = () => {
+            if (selectedFixFolders.has(f.name)) {
+              selectedFixFolders.delete(f.name);
+            } else {
+              selectedFixFolders.add(f.name);
+              if (f.sample_photo && !document.getElementById("fixRefPhotoInput").value) {
+                document.getElementById("fixRefPhotoInput").value = f.sample_photo;
+              }
+            }
+            document.getElementById("fixFoldersInput").value = Array.from(selectedFixFolders).join(", ");
+            loadLocalFolders();
+          };
+
+          const viewLocalBtn = document.createElement("button");
+          viewLocalBtn.style.padding = "6px 10px";
+          viewLocalBtn.style.fontSize = "11.5px";
+          viewLocalBtn.textContent = "👁️ Ver 360°";
+          viewLocalBtn.onclick = () => {
+            const sourceFiles = (f.stitched_photos && f.stitched_photos.length)
+              ? f.stitched_photos
+              : (f.raw_photos || []);
+            if (!sourceFiles.length) {
+              showToast("⚠️ No hay fotos en esta carpeta para visualizar.", true);
+              return;
+            }
+            const list = sourceFiles.map(fname => ({
+              title: `${f.label} / ${fname}`,
+              source: "local",
+              folder: f.name,
+              filename: fname,
+              viewUrl: `/api/local_media?folder=${encodeURIComponent(f.name)}&file=${encodeURIComponent(fname)}&stitch=1`,
+              dlUrl: `/api/local_media?folder=${encodeURIComponent(f.name)}&file=${encodeURIComponent(fname)}&stitch=1&download=1`,
+            }));
+            open360Viewer(list, 0);
+          };
+
+          const stitchBtn = document.createElement("button");
+          stitchBtn.className = "primary";
+          stitchBtn.style.padding = "6px 10px";
+          stitchBtn.style.fontSize = "11.5px";
+          stitchBtn.textContent = "🌐 Coser / XMP 360°...";
+          stitchBtn.onclick = () => stitchLocalFolder(f.name);
+
+          row.appendChild(leftBtn);
+          row.appendChild(viewLocalBtn);
+          row.appendChild(stitchBtn);
+          box.appendChild(row);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function stitchLocalFolder(folderName) {
+      const label = folderName === "ALL" ? "todas las carpetas mostradas" : folderName;
+      showToast(`📂 Elige en Finder dónde guardar las fotos 360° de ${label}...`);
+      const data = await apiCall("/api/local_stitch", "POST", { folder: folderName, overwrite: true });
+      if (data.cancelled) {
+        showToast("ℹ️ Procesamiento cancelado.");
+        return;
+      }
+      if (data.ok) {
+        showToast(
+          `✅ Procesadas ${data.total_processed} fotos (${data.stitched_dual_fisheye} cosidas + ${data.tagged_in_camera} XMP) en ${data.dest_dir}`
+        );
+        loadLocalFolders();
+      } else {
+        showToast(`❌ Error al procesar: ${data.error}`, true);
+      }
+    }
+
+    async function runLocalDateFix() {
+      const foldersRaw = document.getElementById("fixFoldersInput").value.trim();
+      const refPhoto = document.getElementById("fixRefPhotoInput").value.trim();
+      const realDate = document.getElementById("fixRealDateInput").value.trim();
+      const folders = foldersRaw.split(",").map(s => s.trim()).filter(Boolean);
+
+      if (!folders.length || !refPhoto || !realDate) {
+        showToast("⚠️ Indica las carpetas, la foto de referencia y su fecha/hora real (AAAA-MM-DD HH:MM)", true);
+        return;
+      }
+
+      showToast(`🕒 Corrigiendo fechas y EXIF en ${folders.join(", ")}...`);
+      const data = await apiCall("/api/local_fix_dates", "POST", {
+        folders,
+        ref_filename: refPhoto,
+        ref_real_dt: realDate,
+      });
+      if (data.ok) {
+        selectedFixFolders.clear();
+        document.getElementById("fixFoldersInput").value = "";
+        showToast(`✅ ¡${data.corrected_files} archivos corregidos! (${(data.renamed_folders || []).join("; ")})`);
+        loadLocalFolders();
+      } else {
+        showToast(`❌ Error: ${data.error}`, true);
+      }
+    }
+
+    // =========================================================================
+    // VISOR INTERACTIVO 360° ESFÉRICO (WebGL Raycaster 100% Offline)
+    // =========================================================================
+    let v360 = {
+      playlist: [],
+      index: 0,
+      isOpen: false,
+      isFlatMode: false,
+      autoRotate: false,
+      yaw: 0,
+      pitch: 0,
+      fovDeg: 75,
+      dragging: false,
+      lastX: 0,
+      lastY: 0,
+      gl: null,
+      prog: null,
+      tex: null,
+      uYaw: null,
+      uPitch: null,
+      uTanHalfFov: null,
+      uAspect: null,
+      rafId: null,
+      loadedImg: null,
+    };
+
+    function initWebGL360() {
+      if (v360.gl) return true;
+      const canvas = document.getElementById("viewer360Canvas");
+      const gl = canvas.getContext("webgl", { antialias: true, preserveDrawingBuffer: false });
+      if (!gl) return false;
+
+      const vsSource = `
+        attribute vec2 aPos;
+        varying vec2 vNdc;
+        void main() {
+          vNdc = aPos;
+          gl_Position = vec4(aPos, 0.0, 1.0);
+        }
+      `;
+
+      const fsSource = `
+        precision highp float;
+        varying vec2 vNdc;
+        uniform sampler2D uTex;
+        uniform float uYaw;
+        uniform float uPitch;
+        uniform float uTanHalfFov;
+        uniform float uAspect;
+        const float PI = 3.141592653589793;
+
+        void main() {
+          // Rayo en espacio de cámara
+          vec3 dir = normalize(vec3(vNdc.x * uTanHalfFov * uAspect, vNdc.y * uTanHalfFov, -1.0));
+
+          // Rotación Pitch (eje X)
+          float cp = cos(uPitch);
+          float sp = sin(uPitch);
+          vec3 d1 = vec3(dir.x, dir.y * cp - dir.z * sp, dir.y * sp + dir.z * cp);
+
+          // Rotación Yaw (eje Y)
+          float cy = cos(uYaw);
+          float sy = sin(uYaw);
+          vec3 worldDir = vec3(d1.x * cy - d1.z * sy, d1.y, d1.x * sy + d1.z * cy);
+
+          // Coordenadas esféricas a UV equirectangular [0, 1]
+          float lon = atan(worldDir.x, -worldDir.z);
+          float lat = asin(clamp(worldDir.y, -1.0, 1.0));
+          float u = fract(lon / (2.0 * PI) + 0.5);
+          float v = clamp(0.5 - lat / PI, 0.0, 1.0);
+
+          gl_FragColor = texture2D(uTex, vec2(u, v));
+        }
+      `;
+
+      function compileShader(type, src) {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        return s;
+      }
+
+      const prog = gl.createProgram();
+      gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, vsSource));
+      gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, fsSource));
+      gl.linkProgram(prog);
+      gl.useProgram(prog);
+
+      const quad = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+
+      const aPos = gl.getAttribLocation(prog, "aPos");
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+      v360.gl = gl;
+      v360.prog = prog;
+      v360.tex = tex;
+      v360.uYaw = gl.getUniformLocation(prog, "uYaw");
+      v360.uPitch = gl.getUniformLocation(prog, "uPitch");
+      v360.uTanHalfFov = gl.getUniformLocation(prog, "uTanHalfFov");
+      v360.uAspect = gl.getUniformLocation(prog, "uAspect");
+
+      // Eventos de mouse y trackpad sobre el canvas
+      canvas.addEventListener("mousedown", e => {
+        v360.dragging = true;
+        v360.lastX = e.clientX;
+        v360.lastY = e.clientY;
+      });
+      window.addEventListener("mousemove", e => {
+        if (!v360.dragging || !v360.isOpen) return;
+        const dx = e.clientX - v360.lastX;
+        const dy = e.clientY - v360.lastY;
+        v360.lastX = e.clientX;
+        v360.lastY = e.clientY;
+        const sens = (v360.fovDeg / 75.0) * 0.0032;
+        v360.yaw -= dx * sens;
+        v360.pitch = Math.max(-1.53, Math.min(1.53, v360.pitch + dy * sens));
+      });
+      window.addEventListener("mouseup", () => {
+        v360.dragging = false;
+      });
+
+      // Eventos táctiles
+      canvas.addEventListener("touchstart", e => {
+        if (e.touches.length === 1) {
+          v360.dragging = true;
+          v360.lastX = e.touches[0].clientX;
+          v360.lastY = e.touches[0].clientY;
+        }
+      }, { passive: true });
+      canvas.addEventListener("touchmove", e => {
+        if (!v360.dragging || e.touches.length !== 1) return;
+        const dx = e.touches[0].clientX - v360.lastX;
+        const dy = e.touches[0].clientY - v360.lastY;
+        v360.lastX = e.touches[0].clientX;
+        v360.lastY = e.touches[0].clientY;
+        const sens = (v360.fovDeg / 75.0) * 0.0035;
+        v360.yaw -= dx * sens;
+        v360.pitch = Math.max(-1.53, Math.min(1.53, v360.pitch + dy * sens));
+      }, { passive: true });
+      canvas.addEventListener("touchend", () => {
+        v360.dragging = false;
+      });
+
+      // Zoom con rueda / gesto de dos dedos en trackpad
+      canvas.addEventListener("wheel", e => {
+        e.preventDefault();
+        v360.fovDeg = Math.max(25, Math.min(110, v360.fovDeg + e.deltaY * 0.04));
+      }, { passive: false });
+
+      return true;
+    }
+
+    function render360Loop() {
+      if (!v360.isOpen) return;
+      if (!v360.isFlatMode && v360.gl && v360.loadedImg) {
+        const canvas = document.getElementById("viewer360Canvas");
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const w = Math.floor(canvas.clientWidth * dpr);
+        const h = Math.floor(canvas.clientHeight * dpr);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        if (v360.autoRotate && !v360.dragging) {
+          v360.yaw += 0.0022;
+        }
+        const gl = v360.gl;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.useProgram(v360.prog);
+        gl.uniform1f(v360.uYaw, v360.yaw);
+        gl.uniform1f(v360.uPitch, v360.pitch);
+        gl.uniform1f(v360.uTanHalfFov, Math.tan((v360.fovDeg * Math.PI) / 360.0));
+        gl.uniform1f(v360.uAspect, canvas.width / Math.max(1, canvas.height));
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+      v360.rafId = requestAnimationFrame(render360Loop);
+    }
+
+    function open360Viewer(playlist, startIndex = 0) {
+      if (!playlist || !playlist.length) return;
+      initWebGL360();
+      v360.playlist = playlist;
+      v360.index = Math.max(0, Math.min(playlist.length - 1, startIndex));
+      v360.isOpen = true;
+      document.getElementById("viewer360Modal").classList.remove("hidden");
+      loadCurrent360Slide();
+      cancelAnimationFrame(v360.rafId);
+      v360.rafId = requestAnimationFrame(render360Loop);
+    }
+
+    function downloadCurrent360Slide() {
+      const item = v360.playlist[v360.index];
+      if (!item) return;
+      saveSingleFileWithDialog(item.source || "sd", item.folder || "", item.filename || item.title, true);
+    }
+
+    function loadCurrent360Slide() {
+      const item = v360.playlist[v360.index];
+      if (!item) return;
+
+      document.getElementById("viewer360FileTitle").textContent = item.title;
+      document.getElementById("viewer360Counter").textContent =
+        v360.playlist.length > 1 ? `(${v360.index + 1} de ${v360.playlist.length})` : "";
+      document.getElementById("btn360Prev").disabled = v360.playlist.length <= 1;
+      document.getElementById("btn360Next").disabled = v360.playlist.length <= 1;
+
+      const loader = document.getElementById("viewer360Loader");
+      loader.classList.remove("hidden");
+      document.getElementById("viewer360LoaderText").textContent =
+        `Cargando y proyectando ${item.title} en esfera 360°...`;
+
+      const flatImg = document.getElementById("viewer360FlatImg");
+      flatImg.src = item.viewUrl;
+
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        v360.loadedImg = img;
+        if (v360.gl) {
+          const gl = v360.gl;
+          gl.bindTexture(gl.TEXTURE_2D, v360.tex);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+        }
+        loader.classList.add("hidden");
+      };
+      img.onerror = () => {
+        document.getElementById("viewer360LoaderText").textContent =
+          "❌ No se pudo cargar la imagen. Verifica la conexión con la cámara.";
+      };
+      img.src = item.viewUrl;
+    }
+
+    function step360Viewer(delta) {
+      if (!v360.playlist.length) return;
+      v360.index = (v360.index + delta + v360.playlist.length) % v360.playlist.length;
+      loadCurrent360Slide();
+    }
+
+    function toggle360FlatMode() {
+      v360.isFlatMode = !v360.isFlatMode;
+      document.getElementById("viewer360Canvas").classList.toggle("hidden", v360.isFlatMode);
+      document.getElementById("viewer360FlatImg").classList.toggle("hidden", !v360.isFlatMode);
+      document.getElementById("viewer360Hint").classList.toggle("hidden", v360.isFlatMode);
+      document.getElementById("btn360ToggleFlat").textContent =
+        v360.isFlatMode ? "🌐 Ver Esfera 360°" : "🖼️ Ver Plano 2D";
+    }
+
+    function toggle360AutoRotate() {
+      v360.autoRotate = !v360.autoRotate;
+      const btn = document.getElementById("btn360AutoRotate");
+      btn.className = v360.autoRotate ? "primary" : "";
+      btn.textContent = v360.autoRotate ? "⏸️ Pausar Giro" : "🔄 Auto-Giro";
+    }
+
+    function reset360CameraView() {
+      v360.yaw = 0;
+      v360.pitch = 0;
+      v360.fovDeg = 75;
+    }
+
+    function toggle360Fullscreen() {
+      const modal = document.getElementById("viewer360Modal");
+      if (!document.fullscreenElement) {
+        modal.requestFullscreen?.();
+      } else {
+        document.exitFullscreen?.();
+      }
+    }
+
+    function close360Viewer() {
+      v360.isOpen = false;
+      cancelAnimationFrame(v360.rafId);
+      if (document.fullscreenElement) {
+        document.exitFullscreen?.();
+      }
+      document.getElementById("viewer360Modal").classList.add("hidden");
+    }
+
+    window.addEventListener("keydown", e => {
+      if (!v360.isOpen) return;
+      if (e.key === "Escape") close360Viewer();
+      else if (e.key === "ArrowLeft") step360Viewer(-1);
+      else if (e.key === "ArrowRight") step360Viewer(1);
+    });
+
+    // =========================================================================
+    // VISTA EN VIVO 360° (RTSP -> WebGL con Calibración LUT de Fábrica)
+    // =========================================================================
+    let liveView = {
+      active: false,
+      mode: 0, // 0: Esfera 360° Interactiva, 1: Panorama 360° Cosido, 2: 2 Esferas Directo
+      yaw: 0,
+      pitch: 0,
+      fovDeg: 75,
+      dragging: false,
+      lastX: 0,
+      lastY: 0,
+      gl: null,
+      prog: null,
+      videoTex: null,
+      lut1Tex: null,
+      lut2Tex: null,
+      weightTex: null,
+      hasLut: false,
+      hasVideoFrame: false,
+      lastFrameId: 0,
+      fpsCount: 0,
+      fpsLastTs: performance.now(),
+      fpsDisplay: 0,
+      rafId: null,
+      uLocs: {},
+    };
+
+    function initLiveWebGL() {
+      if (liveView.gl) return true;
+      const canvas = document.getElementById("liveCanvas");
+      const gl = canvas.getContext("webgl", { antialias: true, preserveDrawingBuffer: false });
+      if (!gl) return false;
+
+      const vsSrc = `
+        attribute vec2 aPos;
+        varying vec2 vNdc;
+        void main() {
+          vNdc = aPos;
+          gl_Position = vec4(aPos, 0.0, 1.0);
+        }
+      `;
+
+      const fsSrc = `
+        precision highp float;
+        varying vec2 vNdc;
+        uniform sampler2D uVideoTex;
+        uniform sampler2D uLut1Tex;
+        uniform sampler2D uLut2Tex;
+        uniform sampler2D uWeightTex;
+        uniform int uMode;
+        uniform int uHasLut;
+        uniform float uYaw;
+        uniform float uPitch;
+        uniform float uTanHalfFov;
+        uniform float uAspect;
+        const float PI = 3.141592653589793;
+
+        float decode16(vec2 rg) {
+          float hi = floor(rg.x * 255.0 + 0.5);
+          float lo = floor(rg.y * 255.0 + 0.5);
+          return (hi * 256.0 + lo) / 65535.0;
+        }
+
+        vec2 decodeUV(sampler2D lutTex, vec2 gridPos) {
+          vec4 c = texture2D(lutTex, gridPos);
+          return vec2(decode16(c.rg), decode16(c.ba));
+        }
+
+        vec2 sampleLutBilinear(sampler2D lutTex, vec2 eqUV) {
+          float gx_f = fract(eqUV.x) * 512.0;
+          float gy_f = clamp(eqUV.y, 0.0, 1.0) * 255.0;
+          float gx0 = floor(gx_f);
+          float gx1 = mod(gx0 + 1.0, 512.0);
+          float gy0 = floor(gy_f);
+          float gy1 = min(gy0 + 1.0, 255.0);
+          float fx = gx_f - gx0;
+          float fy = gy_f - gy0;
+
+          vec2 p00 = vec2((gx0 + 0.5) / 512.0, (gy0 + 0.5) / 256.0);
+          vec2 p10 = vec2((gx1 + 0.5) / 512.0, (gy0 + 0.5) / 256.0);
+          vec2 p01 = vec2((gx0 + 0.5) / 512.0, (gy1 + 0.5) / 256.0);
+          vec2 p11 = vec2((gx1 + 0.5) / 512.0, (gy1 + 0.5) / 256.0);
+
+          vec2 uv00 = decodeUV(lutTex, p00);
+          vec2 uv10 = decodeUV(lutTex, p10);
+          vec2 uv01 = decodeUV(lutTex, p01);
+          vec2 uv11 = decodeUV(lutTex, p11);
+
+          return mix(mix(uv00, uv10, fx), mix(uv01, uv11, fx), fy);
+        }
+
+        vec4 sampleStitchedEquirect(vec2 eqUV) {
+          if (uHasLut == 0) {
+            return texture2D(uVideoTex, eqUV);
+          }
+          float w1 = texture2D(uWeightTex, eqUV).r;
+          vec4 col1 = vec4(0.0);
+          vec4 col2 = vec4(0.0);
+          if (w1 > 0.001) {
+            vec2 uv1 = sampleLutBilinear(uLut1Tex, eqUV);
+            col1 = texture2D(uVideoTex, uv1);
+          }
+          if (w1 < 0.999) {
+            vec2 uv2 = sampleLutBilinear(uLut2Tex, eqUV);
+            col2 = texture2D(uVideoTex, uv2);
+          }
+          return mix(col2, col1, w1);
+        }
+
+        void main() {
+          if (uMode == 2) {
+            // Vista Directa de 2 Esferas (Dual-Fisheye crudo)
+            vec2 uv = vec2(vNdc.x * 0.5 + 0.5, 0.5 - vNdc.y * 0.5);
+            gl_FragColor = texture2D(uVideoTex, uv);
+            return;
+          }
+          if (uMode == 1) {
+            // Panorama 360° Equirrectangular completo en vivo
+            vec2 eqUV = vec2(vNdc.x * 0.5 + 0.5, 0.5 - vNdc.y * 0.5);
+            gl_FragColor = sampleStitchedEquirect(eqUV);
+            return;
+          }
+
+          // Modo 0: Esfera 360° Interactiva en Vivo
+          vec3 dir = normalize(vec3(vNdc.x * uTanHalfFov * uAspect, vNdc.y * uTanHalfFov, -1.0));
+          float cp = cos(uPitch);
+          float sp = sin(uPitch);
+          vec3 d1 = vec3(dir.x, dir.y * cp - dir.z * sp, dir.y * sp + dir.z * cp);
+          float cy = cos(uYaw);
+          float sy = sin(uYaw);
+          vec3 worldDir = vec3(d1.x * cy - d1.z * sy, d1.y, d1.x * sy + d1.z * cy);
+
+          float lon = atan(worldDir.x, -worldDir.z);
+          float lat = asin(clamp(worldDir.y, -1.0, 1.0));
+          float u = fract(lon / (2.0 * PI) + 0.5);
+          float v = clamp(0.5 - lat / PI, 0.0, 1.0);
+
+          gl_FragColor = sampleStitchedEquirect(vec2(u, v));
+        }
+      `;
+
+      function compile(type, src) {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        return s;
+      }
+
+      const prog = gl.createProgram();
+      gl.attachShader(prog, compile(gl.VERTEX_SHADER, vsSrc));
+      gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fsSrc));
+      gl.linkProgram(prog);
+      gl.useProgram(prog);
+
+      const quad = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+
+      const aPos = gl.getAttribLocation(prog, "aPos");
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      function makeTex(filter) {
+        const t = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+        return t;
+      }
+
+      liveView.videoTex = makeTex(gl.LINEAR);
+      liveView.lut1Tex = makeTex(gl.NEAREST);
+      liveView.lut2Tex = makeTex(gl.NEAREST);
+      liveView.weightTex = makeTex(gl.LINEAR);
+
+      gl.uniform1i(gl.getUniformLocation(prog, "uVideoTex"), 0);
+      gl.uniform1i(gl.getUniformLocation(prog, "uLut1Tex"), 1);
+      gl.uniform1i(gl.getUniformLocation(prog, "uLut2Tex"), 2);
+      gl.uniform1i(gl.getUniformLocation(prog, "uWeightTex"), 3);
+
+      liveView.uLocs = {
+        uMode: gl.getUniformLocation(prog, "uMode"),
+        uHasLut: gl.getUniformLocation(prog, "uHasLut"),
+        uYaw: gl.getUniformLocation(prog, "uYaw"),
+        uPitch: gl.getUniformLocation(prog, "uPitch"),
+        uTanHalfFov: gl.getUniformLocation(prog, "uTanHalfFov"),
+        uAspect: gl.getUniformLocation(prog, "uAspect"),
+      };
+
+      liveView.gl = gl;
+      liveView.prog = prog;
+
+      // Eventos de rotación y zoom sobre el canvas en vivo
+      canvas.addEventListener("mousedown", e => {
+        if (liveView.mode !== 0) return;
+        liveView.dragging = true;
+        liveView.lastX = e.clientX;
+        liveView.lastY = e.clientY;
+      });
+      window.addEventListener("mousemove", e => {
+        if (!liveView.dragging || !liveView.active) return;
+        const dx = e.clientX - liveView.lastX;
+        const dy = e.clientY - liveView.lastY;
+        liveView.lastX = e.clientX;
+        liveView.lastY = e.clientY;
+        const sens = (liveView.fovDeg / 75.0) * 0.004;
+        liveView.yaw -= dx * sens;
+        liveView.pitch = Math.max(-1.53, Math.min(1.53, liveView.pitch + dy * sens));
+      });
+      window.addEventListener("mouseup", () => {
+        liveView.dragging = false;
+      });
+      canvas.addEventListener("wheel", e => {
+        if (liveView.mode !== 0) return;
+        e.preventDefault();
+        liveView.fovDeg = Math.max(28, Math.min(110, liveView.fovDeg + e.deltaY * 0.04));
+      }, { passive: false });
+
+      return true;
+    }
+
+    async function ensureLiveLutLoaded() {
+      if (liveView.hasLut || !liveView.gl) return;
+      try {
+        const res = await fetch("/api/live_lut");
+        if (!res.ok) return;
+        const buf = await res.arrayBuffer();
+        const GN = 512 * 256;
+        if (buf.byteLength !== GN * 9) return;
+
+        const lut1 = new Uint8Array(buf, 0, GN * 4);
+        const lut2 = new Uint8Array(buf, GN * 4, GN * 4);
+        const w1 = new Uint8Array(buf, GN * 8, GN);
+
+        const gl = liveView.gl;
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, liveView.lut1Tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 512, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, lut1);
+
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, liveView.lut2Tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 512, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, lut2);
+
+        gl.activeTexture(gl.TEXTURE3);
+        gl.bindTexture(gl.TEXTURE_2D, liveView.weightTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 512, 256, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, w1);
+
+        liveView.hasLut = true;
+      } catch (e) {
+        console.warn("LUT en vivo no disponible aún:", e);
+      }
+    }
+
+    function renderLiveWebGLLoop() {
+      if (!liveView.active) return;
+      if (liveView.gl && liveView.hasVideoFrame) {
+        const canvas = document.getElementById("liveCanvas");
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const w = Math.floor(canvas.clientWidth * dpr);
+        const h = Math.floor(canvas.clientHeight * dpr);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+
+        const gl = liveView.gl;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.useProgram(liveView.prog);
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, liveView.videoTex);
+        if (liveView.hasLut) {
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, liveView.lut1Tex);
+          gl.activeTexture(gl.TEXTURE2);
+          gl.bindTexture(gl.TEXTURE_2D, liveView.lut2Tex);
+          gl.activeTexture(gl.TEXTURE3);
+          gl.bindTexture(gl.TEXTURE_2D, liveView.weightTex);
+        }
+
+        gl.uniform1i(liveView.uLocs.uMode, liveView.mode);
+        gl.uniform1i(liveView.uLocs.uHasLut, liveView.hasLut ? 1 : 0);
+        gl.uniform1f(liveView.uLocs.uYaw, liveView.yaw);
+        gl.uniform1f(liveView.uLocs.uPitch, liveView.pitch);
+        gl.uniform1f(liveView.uLocs.uTanHalfFov, Math.tan((liveView.fovDeg * Math.PI) / 360.0));
+        gl.uniform1f(liveView.uLocs.uAspect, canvas.width / Math.max(1, canvas.height));
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+      liveView.rafId = requestAnimationFrame(renderLiveWebGLLoop);
+    }
+
+    async function fetchLiveFramesLoop() {
+      while (liveView.active) {
+        try {
+          const res = await fetch(`/api/live_frame?after=${liveView.lastFrameId}&t=${Date.now()}`, {
+            cache: "no-store",
+          });
+          if (!liveView.active) break;
+
+          if (!res.ok) {
+            let errText = "Esperando señal RTSP de la cámara (rtsp://192.168.42.1/live)...";
+            try {
+              const j = await res.json();
+              if (j.error) errText = j.error;
+            } catch (_) {}
+            document.getElementById("liveOverlayMsg").classList.remove("hidden");
+            document.getElementById("liveOverlayText").textContent = errText;
+            await new Promise(r => setTimeout(r, 800));
+            continue;
+          }
+
+          const fid = parseInt(res.headers.get("X-Frame-Id") || "0", 10);
+          if (fid > 0) liveView.lastFrameId = fid;
+
+          const blob = await res.blob();
+          if (!liveView.active) break;
+
+          const bmp = await createImageBitmap(blob);
+          if (liveView.gl) {
+            const gl = liveView.gl;
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, liveView.videoTex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bmp);
+            bmp.close?.();
+            liveView.hasVideoFrame = true;
+            document.getElementById("liveOverlayMsg").classList.add("hidden");
+
+            liveView.fpsCount += 1;
+            const now = performance.now();
+            if (now - liveView.fpsLastTs >= 1000) {
+              liveView.fpsDisplay = Math.round((liveView.fpsCount * 1000) / (now - liveView.fpsLastTs));
+              liveView.fpsCount = 0;
+              liveView.fpsLastTs = now;
+              document.getElementById("liveSubStatus").innerHTML =
+                `<span style="color:#34d399; font-weight:700;">🟢 EN VIVO</span> • ${liveView.fpsDisplay} fps • Cosido 360° GPU activo`;
+            }
+          }
+        } catch (e) {
+          if (!liveView.active) break;
+          await new Promise(r => setTimeout(r, 700));
+        }
+      }
+    }
+
+    async function toggleLiveView() {
+      const btn = document.getElementById("btnToggleLive");
+      const container = document.getElementById("liveViewContainer");
+      const sub = document.getElementById("liveSubStatus");
+
+      if (!liveView.active) {
+        initLiveWebGL();
+        await ensureLiveLutLoaded();
+        liveView.active = true;
+        liveView.lastFrameId = 0;
+        liveView.fpsCount = 0;
+        liveView.fpsLastTs = performance.now();
+
+        container.classList.remove("hidden");
+        document.getElementById("liveOverlayMsg").classList.remove("hidden");
+        document.getElementById("liveOverlayText").textContent =
+          "Iniciando vista en vivo (msg_id: 259 -> rtsp://192.168.42.1/live)...";
+
+        btn.className = "danger";
+        btn.textContent = "⏹️ Apagar Vista en Vivo";
+        sub.textContent = "⏳ Conectando flujo RTSP con la cámara...";
+
+        apiCall("/api/live/start", "POST").catch(() => {});
+        cancelAnimationFrame(liveView.rafId);
+        liveView.rafId = requestAnimationFrame(renderLiveWebGLLoop);
+        fetchLiveFramesLoop();
+      } else {
+        await stopLiveViewUI();
+      }
+    }
+
+    async function stopLiveViewUI() {
+      liveView.active = false;
+      cancelAnimationFrame(liveView.rafId);
+      if (document.fullscreenElement === document.getElementById("liveStage")) {
+        document.exitFullscreen?.();
+      }
+      document.getElementById("liveViewContainer").classList.add("hidden");
+      const btn = document.getElementById("btnToggleLive");
+      btn.className = "primary";
+      btn.textContent = "👁️ Encender Vista en Vivo";
+      document.getElementById("liveSubStatus").textContent =
+        "Apagada (ahorro de batería y temperatura)";
+      try {
+        await apiCall("/api/live/stop", "POST");
+      } catch (_) {}
+    }
+
+    function setLiveViewMode(mode) {
+      liveView.mode = mode;
+      document.getElementById("btnLiveMode0").className = "pill-btn" + (mode === 0 ? " active" : "");
+      document.getElementById("btnLiveMode1").className = "pill-btn" + (mode === 1 ? " active" : "");
+      document.getElementById("btnLiveMode2").className = "pill-btn" + (mode === 2 ? " active" : "");
+      document.getElementById("liveHintBar").classList.toggle("hidden", mode !== 0);
+      document.getElementById("liveCanvas").style.cursor = mode === 0 ? "grab" : "default";
+    }
+
+    function resetLiveCameraOrientation() {
+      liveView.yaw = 0;
+      liveView.pitch = 0;
+      liveView.fovDeg = 75;
+    }
+
+    function toggleLiveFullscreen() {
+      const stage = document.getElementById("liveStage");
+      if (!document.fullscreenElement) {
+        stage.requestFullscreen?.();
+      } else {
+        document.exitFullscreen?.();
+      }
+    }
+
+    window.addEventListener("beforeunload", () => {
+      if (liveView.active) {
+        navigator.sendBeacon?.("/api/live/stop", "{}");
+      }
+    });
+
+    loadStatus();
+    loadLocalFolders();
+    setInterval(loadStatus, 1500);
+  </script>
+</body>
+</html>
