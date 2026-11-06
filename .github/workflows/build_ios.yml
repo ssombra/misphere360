@@ -39,7 +39,7 @@ jobs:
       - name: Crear Instalador (.ipa)
         run: |
           mkdir -p build/Payload
-          cp -R build/MiSphere360.xcarchive/Products/Applications/MiSphere360.app build/Payload/
+          cp -R build/MiSphere360.xcarchive/Products/Applications/*.app build/Payload/
           cd build
           zip -qr MiSphere360.ipa Payload
           ls -lh MiSphere360.ipa
