@@ -2,105 +2,85 @@ import SwiftUI
 
 struct GalleryView: View {
     @Environment(\.dismiss) var dismiss
+    @ObservedObject var camera = CameraManager.shared
     @ObservedObject var downloader = MediaDownloader.shared
 
-    @State private var items: [MediaDownloader.MediaItem] = []
+    @State private var folders: [String] = []
+    @State private var selectedFolder: String = ""
+    @State private var files: [SDFileItem] = []
     @State private var isLoading = false
     @State private var alertMessage = ""
     @State private var showAlert = false
+    @State private var itemToDelete: SDFileItem?
+    @State private var showDeleteConfirm = false
+
+    private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0)
+    private let darkBg = Color(red: 0.05, green: 0.06, blue: 0.09)
+    private let cardBg = Color(red: 0.10, green: 0.12, blue: 0.18)
 
     var body: some View {
         NavigationView {
             ZStack {
-                Color(red: 0.05, green: 0.06, blue: 0.09).ignoresSafeArea()
+                darkBg.ignoresSafeArea()
 
-                if isLoading {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: Color(red: 1.0, green: 0.4, blue: 0.0)))
-                            .scaleEffect(1.4)
-                        Text("Leyendo tarjeta microSD...")
-                            .foregroundColor(.secondary)
+                VStack(spacing: 0) {
+                    // 1. Barra de Almacenamiento microSD
+                    storageStatusBar
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+
+                    // 2. Selector Horizontal de Carpetas
+                    if !folders.isEmpty {
+                        folderPickerBar
+                            .padding(.bottom, 8)
                     }
-                } else if items.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-                        Text("No se encontraron fotos o videos.")
-                            .foregroundColor(.secondary)
-                        Button("Reintentar Lectura") {
-                            loadDCIMListing()
+
+                    // 3. Contenido Principal (Lista de Fotos / Videos)
+                    if isLoading {
+                        Spacer()
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: brandOrange))
+                                .scaleEffect(1.4)
+                            Text("Leyendo archivos de la microSD...")
+                                .foregroundColor(.secondary)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Color(red: 1.0, green: 0.4, blue: 0.0))
-                    }
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 14) {
-                            ForEach(items) { item in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color(red: 0.12, green: 0.15, blue: 0.22))
-                                            .frame(height: 110)
-
-                                        VStack(spacing: 6) {
-                                            Image(systemName: item.isVideo ? "video.fill" : "camera.metering.matrix")
-                                                .font(.system(size: 28))
-                                                .foregroundColor(Color(red: 1.0, green: 0.4, blue: 0.0))
-                                            Text(item.isVideo ? "Video 360°" : "Foto 360°")
-                                                .font(.caption2)
-                                                .foregroundColor(.secondary)
-                                        }
-                                    }
-
-                                    Text(item.filename)
-                                        .font(.caption)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.white)
-                                        .lineLimit(1)
-
-                                    Button {
-                                        downloader.saveMediaToCameraRoll(item: item) { ok, msg in
-                                            alertMessage = msg
-                                            showAlert = true
-                                        }
-                                    } label: {
-                                        HStack {
-                                            Image(systemName: "square.and.arrow.down")
-                                            Text("Guardar")
-                                        }
-                                        .font(.caption2)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 6)
-                                        .background(Color(red: 1.0, green: 0.4, blue: 0.0))
-                                        .foregroundColor(.white)
-                                        .cornerRadius(8)
-                                    }
-                                }
-                                .padding(8)
-                                .background(Color(red: 0.08, green: 0.10, blue: 0.15))
-                                .cornerRadius(14)
+                        Spacer()
+                    } else if files.isEmpty {
+                        Spacer()
+                        VStack(spacing: 16) {
+                            Image(systemName: "photo.on.rectangle.angled")
+                                .font(.system(size: 50))
+                                .foregroundColor(.secondary)
+                            Text("No hay archivos en esta carpeta.")
+                                .foregroundColor(.secondary)
+                            Button("Refrescar") {
+                                refreshAll()
                             }
+                            .buttonStyle(.borderedProminent)
+                            .tint(brandOrange)
                         }
-                        .padding()
+                        Spacer()
+                    } else {
+                        fileGrid
                     }
                 }
 
+                // Overlay de Descarga
                 if downloader.isDownloading {
-                    Color.black.opacity(0.6).ignoresSafeArea()
-                    VStack(spacing: 12) {
+                    Color.black.opacity(0.65).ignoresSafeArea()
+                    VStack(spacing: 14) {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .scaleEffect(1.3)
+                            .scaleEffect(1.4)
                         Text(downloader.statusMessage)
                             .foregroundColor(.white)
                             .font(.callout)
+                            .fontWeight(.medium)
                     }
-                    .padding(24)
+                    .padding(26)
                     .background(Color(red: 0.15, green: 0.18, blue: 0.26))
-                    .cornerRadius(16)
+                    .cornerRadius(18)
                 }
             }
             .navigationTitle("microSD Cámara")
@@ -111,65 +91,191 @@ struct GalleryView: View {
                 }
             }
             .onAppear {
-                loadDCIMListing()
+                refreshAll()
             }
             .alert(isPresented: $showAlert) {
-                Alert(title: Text("Descarga"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+                Alert(title: Text("Aviso"), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+            }
+            .alert("¿Borrar archivo de la microSD?", isPresented: $showDeleteConfirm) {
+                Button("Cancelar", role: .cancel) {}
+                Button("Borrar", role: .destructive) {
+                    if let item = itemToDelete {
+                        deleteFile(item)
+                    }
+                }
+            } message: {
+                Text(itemToDelete?.filename ?? "")
             }
         }
     }
 
-    private func loadDCIMListing() {
-        isLoading = true
-        // Consultar servidor HTTP de la cámara para listar carpetas de DCIM
-        guard let url = URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)/DCIM/") else {
-            isLoading = false
-            return
-        }
-        let task = URLSession.shared.dataTask(with: url) { data, _, _ in
-            DispatchQueue.main.async { self.isLoading = false }
-            guard let data = data, let html = String(data: data, encoding: .utf8) else { return }
+    // MARK: - Barra de Almacenamiento
 
-            // Parsear enlaces simples de carpetas como 100MEDIA o 20140105
-            let regex = try? NSRegularExpression(pattern: "href=[\"']([0-9A-Za-z_]+)/?[\"']", options: [])
-            let matches = regex?.matches(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)) ?? []
-            let folders = matches.compactMap { match -> String? in
-                if let r = Range(match.range(at: 1), in: html) {
-                    let name = String(html[r])
-                    return name != "DCIM" && name != ".." ? name : nil
-                }
-                return nil
+    private var storageStatusBar: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Almacenamiento SD")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text("\(camera.sdFreeMB / 1024) GB libres de \(camera.sdTotalMB / 1024) GB")
+                    .font(.footnote)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
             }
 
-            for f in folders {
-                self.fetchFilesInFolder(f)
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("Capacidad")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text("\(camera.remainJPG) fotos • \(camera.remainVideo)s video")
+                    .font(.footnote)
+                    .fontWeight(.semibold)
+                    .foregroundColor(brandOrange)
             }
         }
-        task.resume()
+        .padding(12)
+        .background(cardBg)
+        .cornerRadius(12)
     }
 
-    private func fetchFilesInFolder(_ folder: String) {
-        guard let url = URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)/DCIM/\(folder)/") else { return }
-        URLSession.shared.dataTask(with: url) { data, _, _ in
-            guard let data = data, let html = String(data: data, encoding: .utf8) else { return }
-            let regex = try? NSRegularExpression(pattern: "href=[\"']([0-9A-Za-z_\\.]+\\.(JPG|MP4))[\"']", options: [.caseInsensitive])
-            let matches = regex?.matches(in: html, options: [], range: NSRange(location: 0, length: html.utf16.count)) ?? []
-            let files = matches.compactMap { match -> String? in
-                if let r = Range(match.range(at: 1), in: html) {
-                    return String(html[r])
-                }
-                return nil
-            }
+    // MARK: - Selector de Carpetas
 
-            DispatchQueue.main.async {
-                for file in files {
-                    let isVid = file.uppercased().hasSuffix(".MP4")
-                    let item = MediaDownloader.MediaItem(folder: folder, filename: file, isVideo: isVid)
-                    if !self.items.contains(where: { $0.filename == item.filename }) {
-                        self.items.append(item)
+    private var folderPickerBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(folders, id: \.self) { folder in
+                    Button {
+                        selectedFolder = folder
+                        loadFiles(in: folder)
+                    } label: {
+                        Text(folder)
+                            .font(.caption)
+                            .fontWeight(selectedFolder == folder ? .bold : .medium)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(selectedFolder == folder ? brandOrange : cardBg)
+                            .foregroundColor(selectedFolder == folder ? .white : .secondary)
+                            .cornerRadius(12)
                     }
                 }
             }
-        }.resume()
+            .padding(.horizontal, 16)
+        }
+    }
+
+    // MARK: - Cuadrícula de Archivos
+
+    private var fileGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 12)], spacing: 12) {
+                ForEach(files) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        // Tarjeta Visual
+                        ZStack(alignment: .topTrailing) {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(red: 0.14, green: 0.17, blue: 0.24))
+                                .frame(height: 105)
+
+                            VStack(spacing: 6) {
+                                Image(systemName: item.isVideo ? "video.fill" : "camera.metering.matrix")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(brandOrange)
+                                Text(item.isVideo ? "VIDEO 360°" : "FOTO 360°")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                            // Botón Borrar
+                            Button {
+                                itemToDelete = item
+                                showDeleteConfirm = true
+                            } label: {
+                                Image(systemName: "trash.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.red)
+                                    .padding(6)
+                                    .background(Color.black.opacity(0.5))
+                                    .clipShape(Circle())
+                            }
+                            .padding(6)
+                        }
+
+                        // Info de Archivo
+                        Text(item.filename)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+
+                        Text(item.date)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+
+                        // Botón Guardar en Carrete
+                        Button {
+                            downloader.saveMediaToCameraRoll(item: item) { ok, msg in
+                                alertMessage = msg
+                                showAlert = true
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "square.and.arrow.down")
+                                Text("Guardar en Fotos")
+                            }
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(brandOrange)
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                        }
+                    }
+                    .padding(8)
+                    .background(cardBg)
+                    .cornerRadius(14)
+                }
+            }
+            .padding(14)
+        }
+    }
+
+    // MARK: - Operaciones
+
+    private func refreshAll() {
+        isLoading = true
+        camera.fetchStorageStatus()
+        camera.listDCIMFolders { list in
+            self.folders = list
+            if let first = list.first {
+                self.selectedFolder = first
+                self.loadFiles(in: first)
+            } else {
+                self.isLoading = false
+            }
+        }
+    }
+
+    private func loadFiles(in folder: String) {
+        isLoading = true
+        camera.listFilesInFolder(folder) { items in
+            self.files = items
+            self.isLoading = false
+        }
+    }
+
+    private func deleteFile(_ item: SDFileItem) {
+        camera.deleteSDFile(folder: item.folder, filename: item.filename) { ok in
+            if ok {
+                files.removeAll(where: { $0.id == item.id })
+                alertMessage = "Archivo eliminado de la tarjeta microSD."
+            } else {
+                alertMessage = "No se pudo borrar el archivo."
+            }
+            showAlert = true
+        }
     }
 }
