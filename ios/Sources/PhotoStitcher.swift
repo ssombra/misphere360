@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import ImageIO
+import CoreLocation
 
 public enum StitchMode: String, CaseIterable, Identifiable {
     case stitched360 = "360"
@@ -38,28 +39,90 @@ public class PhotoStitcher {
 
     /// Procesa una foto según el modo seleccionado (360°, Original o Ambas)
     /// Retorna la lista de URLs locales que deben guardarse en el Carrete de Fotos
-    public func processDownloadedFile(at localURL: URL, isVideo: Bool, mode: StitchMode) -> [URL] {
+    public func processDownloadedFile(
+        at localURL: URL,
+        isVideo: Bool,
+        mode: StitchMode,
+        location: CLLocation? = nil
+    ) -> [URL] {
         if isVideo || mode == .original {
+            if let loc = location, !isVideo {
+                embedGPS(into: localURL, location: loc)
+            }
             return [localURL]
         }
 
         guard let jpgData = try? Data(contentsOf: localURL) else {
+            if let loc = location, !isVideo {
+                embedGPS(into: localURL, location: loc)
+            }
             return [localURL]
         }
 
         let stitchedResultURL = processPhotoTo360(inputURL: localURL, data: jpgData)
+        let final360URL = stitchedResultURL ?? localURL
+
+        if let loc = location {
+            embedGPS(into: final360URL, location: loc)
+        }
 
         switch mode {
         case .stitched360:
-            return [stitchedResultURL ?? localURL]
+            return [final360URL]
         case .both:
-            if let st = stitchedResultURL, st != localURL {
-                return [localURL, st]
+            if final360URL != localURL {
+                if let loc = location {
+                    embedGPS(into: localURL, location: loc)
+                }
+                return [localURL, final360URL]
             } else {
                 return [localURL]
             }
         case .original:
+            if let loc = location {
+                embedGPS(into: localURL, location: loc)
+            }
             return [localURL]
+        }
+    }
+
+    /// Incrusta el bloque EXIF GPS oficial en el archivo JPEG sin recomprimir los píxeles
+    public func embedGPS(into imageURL: URL, location: CLLocation) {
+        guard let src = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
+              let uti = CGImageSourceGetType(src) else { return }
+
+        let tempURL = imageURL.deletingLastPathComponent().appendingPathComponent("gps_\(UUID().uuidString).JPG")
+        guard let dest = CGImageDestinationCreateWithURL(tempURL as CFURL, uti, 1, nil) else { return }
+
+        let lat = location.coordinate.latitude
+        let lon = location.coordinate.longitude
+        let alt = location.altitude
+
+        let formatter = DateFormatter()
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy:MM:dd"
+        let dateStr = formatter.string(from: location.timestamp)
+        formatter.dateFormat = "HH:mm:ss"
+        let timeStr = formatter.string(from: location.timestamp)
+
+        let gpsDict: [CFString: Any] = [
+            kCGImagePropertyGPSLatitude: abs(lat),
+            kCGImagePropertyGPSLatitudeRef: lat >= 0 ? "N" : "S",
+            kCGImagePropertyGPSLongitude: abs(lon),
+            kCGImagePropertyGPSLongitudeRef: lon >= 0 ? "E" : "W",
+            kCGImagePropertyGPSAltitude: abs(alt),
+            kCGImagePropertyGPSAltitudeRef: alt >= 0 ? 0 : 1,
+            kCGImagePropertyGPSTimeStamp: timeStr,
+            kCGImagePropertyGPSDateStamp: dateStr
+        ]
+        let meta: [CFString: Any] = [kCGImagePropertyGPSDictionary: gpsDict]
+
+        CGImageDestinationAddImageFromSource(dest, src, 0, meta as CFDictionary)
+        if CGImageDestinationFinalize(dest) {
+            try? FileManager.default.removeItem(at: imageURL)
+            try? FileManager.default.moveItem(at: tempURL, to: imageURL)
+        } else {
+            try? FileManager.default.removeItem(at: tempURL)
         }
     }
 

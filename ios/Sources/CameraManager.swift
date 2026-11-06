@@ -321,6 +321,7 @@ public class CameraManager: ObservableObject {
             case 4864, 4868: // DISPARO FOTO
                 if rval == 0 {
                     self.lastStatusMessage = "¡Foto capturada!"
+                    LocationManager.shared.recordCurrentShotLocation()
                     self.refreshStatus()
                 }
 
@@ -331,6 +332,10 @@ public class CameraManager: ObservableObject {
                 if rval == 0 { self.isRecording = false; self.lastStatusMessage = "Video guardado." }
 
             case 8192, 8193: // EVENTO ASÍNCRONO DE FOTO (8193) O VIDEO (8192) GUARDADO
+                if msgId == 8193 {
+                    // Foto disparada físicamente en la cámara: congelar GPS de ese segundo exacto
+                    LocationManager.shared.recordCurrentShotLocation()
+                }
                 self.fetchBatteryStatus()
                 self.fetchStorageStatus()
 

@@ -246,19 +246,29 @@ public class MediaDownloader: ObservableObject {
                         : "Guardando en Apple Fotos..."
                 }
 
+                // Recuperar la coordenada satelital registrada en el momento exacto en que se tomó esta foto
+                let shotLocation = LocationManager.shared.getBestLocation(for: item.filename)
+
                 // Procesar según el modo elegido por el usuario (Solo 360°, Solo Original, o Ambas)
                 let filesToSave = PhotoStitcher.shared.processDownloadedFile(
                     at: destinationURL,
                     isVideo: item.isVideo,
-                    mode: mode
+                    mode: mode,
+                    location: shotLocation
                 )
 
                 PHPhotoLibrary.shared().performChanges({
                     for fileURL in filesToSave {
                         if item.isVideo {
-                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
+                            let req = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
+                            if let loc = shotLocation {
+                                req?.location = loc
+                            }
                         } else {
-                            PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
+                            let req = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
+                            if let loc = shotLocation {
+                                req?.location = loc
+                            }
                         }
                     }
                 }) { success, saveError in
