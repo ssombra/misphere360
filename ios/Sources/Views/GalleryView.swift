@@ -13,6 +13,7 @@ struct GalleryView: View {
     @State private var showAlert = false
     @State private var itemToDelete: SDFileItem?
     @State private var showDeleteConfirm = false
+    @AppStorage("defaultStitchMode") private var selectedStitchMode: StitchMode = .stitched360
 
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0)
     private let darkBg = Color(red: 0.05, green: 0.06, blue: 0.09)
@@ -27,9 +28,15 @@ struct GalleryView: View {
                     // 1. Barra de Almacenamiento microSD
                     storageStatusBar
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
+                        .padding(.top, 8)
+                        .padding(.bottom, 6)
 
-                    // 2. Selector Horizontal de Carpetas
+                    // 2. Modo al Guardar (360° por default, Original o Ambas)
+                    stitchModeSelector
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+
+                    // 3. Selector Horizontal de Carpetas
                     if !folders.isEmpty {
                         folderPickerBar
                             .padding(.bottom, 8)
@@ -140,6 +147,46 @@ struct GalleryView: View {
         .cornerRadius(12)
     }
 
+    // MARK: - Selector de Modo al Guardar (360°, Original o Ambas)
+
+    private var stitchModeSelector: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Modo al Guardar:")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white)
+                Spacer()
+                Text(selectedStitchMode == .stitched360 ? "Recomendado" : "")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(brandOrange)
+            }
+
+            HStack(spacing: 6) {
+                ForEach(StitchMode.allCases) { mode in
+                    Button {
+                        selectedStitchMode = mode
+                    } label: {
+                        Text(mode.title)
+                            .font(.system(size: 11, weight: selectedStitchMode == mode ? .bold : .medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(selectedStitchMode == mode ? brandOrange : Color.white.opacity(0.08))
+                            .foregroundColor(selectedStitchMode == mode ? .white : .secondary)
+                            .cornerRadius(8)
+                    }
+                }
+            }
+
+            Text(selectedStitchMode.explanation)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+        }
+        .padding(10)
+        .background(cardBg)
+        .cornerRadius(12)
+    }
+
     // MARK: - Selector de Carpetas
 
     private var folderPickerBar: some View {
@@ -215,23 +262,63 @@ struct GalleryView: View {
                             .foregroundColor(.secondary)
                             .lineLimit(1)
 
-                        // Botón Guardar en Carrete
-                        Button {
-                            downloader.saveMediaToCameraRoll(item: item) { ok, msg in
-                                alertMessage = msg
-                                showAlert = true
+                        // Botón Guardar en Carrete con Menú de Modos
+                        HStack(spacing: 4) {
+                            Button {
+                                downloader.saveMediaToCameraRoll(item: item, mode: selectedStitchMode) { ok, msg in
+                                    alertMessage = msg
+                                    showAlert = true
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "square.and.arrow.down")
+                                    Text(item.isVideo ? "Guardar" : (selectedStitchMode == .stitched360 ? "360°" : (selectedStitchMode == .both ? "Ambas" : "Original")))
+                                }
+                                .font(.system(size: 11, weight: .bold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 7)
+                                .background(brandOrange)
+                                .foregroundColor(.white)
+                                .cornerRadius(8)
                             }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "square.and.arrow.down")
-                                Text("Guardar en Fotos")
+
+                            if !item.isVideo {
+                                Menu {
+                                    Button {
+                                        downloader.saveMediaToCameraRoll(item: item, mode: .stitched360) { ok, msg in
+                                            alertMessage = msg
+                                            showAlert = true
+                                        }
+                                    } label: {
+                                        Label("🌐 Solo 360° (Cocida)", systemImage: "globe")
+                                    }
+
+                                    Button {
+                                        downloader.saveMediaToCameraRoll(item: item, mode: .both) { ok, msg in
+                                            alertMessage = msg
+                                            showAlert = true
+                                        }
+                                    } label: {
+                                        Label("📦 Ambas (Original + 360°)", systemImage: "square.stack.3d.down.right")
+                                    }
+
+                                    Button {
+                                        downloader.saveMediaToCameraRoll(item: item, mode: .original) { ok, msg in
+                                            alertMessage = msg
+                                            showAlert = true
+                                        }
+                                    } label: {
+                                        Label("🔘 Solo Original (microSD)", systemImage: "doc")
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .frame(width: 26, height: 28)
+                                        .background(Color.white.opacity(0.12))
+                                        .cornerRadius(8)
+                                }
                             }
-                            .font(.system(size: 11, weight: .bold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .background(brandOrange)
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
                         }
                     }
                     .padding(8)

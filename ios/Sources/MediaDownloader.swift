@@ -23,7 +23,11 @@ public class MediaDownloader: ObservableObject {
         return URLSession(configuration: config)
     }()
 
-    public func saveMediaToCameraRoll(item: SDFileItem, completion: @escaping (Bool, String) -> Void) {
+    public func saveMediaToCameraRoll(
+        item: SDFileItem,
+        mode: StitchMode = .stitched360,
+        completion: @escaping (Bool, String) -> Void
+    ) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
                 DispatchQueue.main.async {
@@ -38,7 +42,7 @@ public class MediaDownloader: ObservableObject {
                 self.statusMessage = "Buscando \(item.filename)..."
             }
 
-            self.buildAndTryCandidates(item: item, completion: completion)
+            self.buildAndTryCandidates(item: item, mode: mode, completion: completion)
         }
     }
 
@@ -88,7 +92,11 @@ public class MediaDownloader: ObservableObject {
         return unique
     }
 
-    private func buildAndTryCandidates(item: SDFileItem, completion: @escaping (Bool, String) -> Void) {
+    private func buildAndTryCandidates(
+        item: SDFileItem,
+        mode: StitchMode,
+        completion: @escaping (Bool, String) -> Void
+    ) {
         let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let nameVariants = filenameVariants(for: item.filename)
 
@@ -116,7 +124,13 @@ public class MediaDownloader: ObservableObject {
             if let disc = discoveredURL {
                 finalCandidates.insert(disc, at: 0)
             }
-            self.executeCandidateDownload(candidates: finalCandidates, item: item, triedErrors: [], completion: completion)
+            self.executeCandidateDownload(
+                candidates: finalCandidates,
+                item: item,
+                mode: mode,
+                triedErrors: [],
+                completion: completion
+            )
         }
     }
 
@@ -171,6 +185,7 @@ public class MediaDownloader: ObservableObject {
     private func executeCandidateDownload(
         candidates: [URL],
         item: SDFileItem,
+        mode: StitchMode,
         triedErrors: [String],
         completion: @escaping (Bool, String) -> Void
     ) {
@@ -209,7 +224,6 @@ public class MediaDownloader: ObservableObject {
                 }
 
                 // CRÍTICO: Copiar inmediatamente el archivo descargado a un destino temporal propio
-                // porque iOS borra automáticamente el archivo de 'localURL' en cuanto termina este bloque
                 let ext = item.isVideo ? "MP4" : "JPG"
                 let safeName = "MiSphere_\(UUID().uuidString).\(ext)"
                 let destinationURL = FileManager.default.temporaryDirectory.appendingPathComponent(safeName)
@@ -221,36 +235,62 @@ public class MediaDownloader: ObservableObject {
                 } catch {
                     DispatchQueue.main.async {
                         self.isDownloading = false
-                        completion(false, "Error al preparar archivo para Fotos: \(error.localizedDescription)")
+                        completion(false, "Error al preparar archivo temporal: \(error.localizedDescription)")
                     }
                     return
                 }
 
                 DispatchQueue.main.async {
-                    self.statusMessage = "Guardando en Apple Fotos..."
+                    self.statusMessage = (mode == .stitched360 || mode == .both) && !item.isVideo
+                        ? "Procesando metadatos 360°..."
+                        : "Guardando en Apple Fotos..."
                 }
 
+                // Procesar según el modo elegido por el usuario (Solo 360°, Solo Original, o Ambas)
+                let filesToSave = PhotoStitcher.shared.processDownloadedFile(
+                    at: destinationURL,
+                    isVideo: item.isVideo,
+                    mode: mode
+                )
+
                 PHPhotoLibrary.shared().performChanges({
-                    if item.isVideo {
-                        PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: destinationURL)
-                    } else {
-                        PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: destinationURL)
+                    for fileURL in filesToSave {
+                        if item.isVideo {
+                            PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
+                        } else {
+                            PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
+                        }
                     }
                 }) { success, saveError in
-                    // Limpiar copia temporal
+                    // Limpiar copias temporales
                     try? FileManager.default.removeItem(at: destinationURL)
+                    for fileURL in filesToSave where fileURL != destinationURL {
+                        try? FileManager.default.removeItem(at: fileURL)
+                    }
 
                     DispatchQueue.main.async {
                         self.isDownloading = false
                         if success {
-                            completion(true, "¡Guardado exitosamente en tu Carrete de Apple Fotos!")
+                            let msg: String
+                            if item.isVideo {
+                                msg = "¡Video guardado en tu Carrete de Apple Fotos!"
+                            } else {
+                                switch mode {
+                                case .stitched360:
+                                    msg = "¡Foto 360° (con metadatos interactivos GPano) guardada en Fotos!"
+                                case .both:
+                                    msg = "¡Se guardaron ambas fotos (Original + versión 360°) en Fotos!"
+                                case .original:
+                                    msg = "¡Foto original guardada en Fotos!"
+                                }
+                            }
+                            completion(true, msg)
                         } else {
                             completion(false, saveError?.localizedDescription ?? "Error al escribir en Carrete de Fotos.")
                         }
                     }
                 }
             } else {
-                // Registrar intento fallido y probar la siguiente URL candidata
                 var errDesc = "HTTP \(statusCode)"
                 if let err = error {
                     errDesc = err.localizedDescription
@@ -261,6 +301,7 @@ public class MediaDownloader: ObservableObject {
                 self.executeCandidateDownload(
                     candidates: remaining,
                     item: item,
+                    mode: mode,
                     triedErrors: updatedErrors,
                     completion: completion
                 )
