@@ -55,12 +55,19 @@ struct ContentView: View {
         }
         .onAppear {
             location.startTracking()
-            camera.connect()
+            camera.checkAndReconnectIfNeeded()
         }
-        .sheet(isPresented: $showSettings) {
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            camera.checkAndReconnectIfNeeded()
+        }
+        .sheet(isPresented: $showSettings, onDismiss: {
+            camera.checkAndReconnectIfNeeded()
+        }) {
             SettingsView()
         }
-        .sheet(isPresented: $showGallery) {
+        .sheet(isPresented: $showGallery, onDismiss: {
+            camera.checkAndReconnectIfNeeded()
+        }) {
             GalleryView()
         }
     }
@@ -143,30 +150,44 @@ struct ContentView: View {
 
             if !camera.isConnected {
                 VStack(spacing: 14) {
-                    Image(systemName: "wifi.exclamationmark")
-                        .font(.system(size: 48))
-                        .foregroundColor(brandOrange)
+                    if camera.isConnecting {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: brandOrange))
+                            .scaleEffect(1.3)
 
-                    Text("Conéctate al Wi-Fi de la Cámara")
-                        .font(.headline)
-                        .foregroundColor(.white)
-
-                    Text("Ajustes de tu iPhone > Wi-Fi:\nMJXJ-010135")
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(.secondary)
-
-                    Button {
-                        camera.connect()
-                    } label: {
-                        Text(camera.isConnecting ? "Conectando..." : "Reintentar Conexión")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                        Text("Enlazando con la cámara...")
+                            .font(.headline)
                             .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 10)
-                            .background(brandOrange)
-                            .cornerRadius(12)
+
+                        Text("Verificando Wi-Fi MJXJ-010135...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.system(size: 48))
+                            .foregroundColor(brandOrange)
+
+                        Text("Conéctate al Wi-Fi de la Cámara")
+                            .font(.headline)
+                            .foregroundColor(.white)
+
+                        Text("Ajustes de tu iPhone > Wi-Fi:\nMJXJ-010135")
+                            .font(.caption)
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(.secondary)
+
+                        Button {
+                            camera.connect()
+                        } label: {
+                            Text("Reintentar Conexión")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                                .background(brandOrange)
+                                .cornerRadius(12)
+                        }
                     }
                 }
             } else {

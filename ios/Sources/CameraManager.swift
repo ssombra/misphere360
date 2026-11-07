@@ -62,20 +62,79 @@ public class CameraManager: ObservableObject {
     @Published public var dcimFolders: [String] = []
 
     // Callbacks pendientes para comandos TCP asíncronos (ej. list_dir)
-    private var pendingCallbacks: [Int: ([String: Any]) -> Void] = [:]
+    // Callbacks pendientes para comandos TCP asíncronos (cola FIFO por msgId)
+    private var pendingCallbacks: [Int: [([String: Any]) -> Void]] = [:]
     private var lastSendTime: TimeInterval = 0.0
 
     private var connection: NWConnection?
     private let queue = DispatchQueue(label: "com.ssombra.misphere360.tcp", qos: .userInitiated)
-    private var heartbeatTimer: Timer?
+    private var watchdogTimer: DispatchSourceTimer?
+    private var handshakeTimeoutItem: DispatchWorkItem?
+    private var reconnectWorkItem: DispatchWorkItem?
+    private var isUserDisconnected = false
     private var receiveBuffer = ""
 
-    public init() {}
+    public init() {
+        startWatchdog()
+    }
+
+    deinit {
+        stopWatchdog()
+    }
+
+    // MARK: - Reconexión Automática y Watchdog en Segundo Plano
+
+    private func startWatchdog() {
+        stopWatchdog()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1.0, repeating: 2.5)
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            if !self.isUserDisconnected {
+                if !self.isConnected && !self.isConnecting {
+                    self.connect()
+                } else if self.isConnected {
+                    let now = Date().timeIntervalSince1970
+                    // Heartbeat cada 15 segundos para evitar que la cámara cierre la sesión TCP
+                    if now - self.lastSendTime > 15.0 {
+                        self.fetchBatteryStatus()
+                    }
+                }
+            }
+        }
+        timer.resume()
+        self.watchdogTimer = timer
+    }
+
+    private func stopWatchdog() {
+        watchdogTimer?.cancel()
+        watchdogTimer = nil
+    }
+
+    public func checkAndReconnectIfNeeded() {
+        isUserDisconnected = false
+        if !isConnected && !isConnecting {
+            connect()
+        }
+    }
+
+    public func scheduleAutoReconnect(delay: Double = 1.0) {
+        guard !isUserDisconnected else { return }
+        reconnectWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self, !self.isConnected, !self.isConnecting, !self.isUserDisconnected else { return }
+            self.connect()
+        }
+        reconnectWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
 
     // MARK: - Conexión y Desconexión
 
     public func connect() {
         guard !isConnected && !isConnecting else { return }
+        isUserDisconnected = false
+
         DispatchQueue.main.async {
             self.isConnecting = true
             self.lastStatusMessage = "Conectando con la cámara..."
@@ -85,6 +144,7 @@ public class CameraManager: ObservableObject {
         let port = NWEndpoint.Port(rawValue: CameraManager.controlPort)!
         let tcpOptions = NWProtocolTCP.Options()
         tcpOptions.enableKeepalive = true
+        tcpOptions.keepaliveIdle = 10
         let params = NWParameters(tls: nil, tcp: tcpOptions)
 
         connection = NWConnection(host: host, port: port, using: params)
@@ -97,19 +157,23 @@ public class CameraManager: ObservableObject {
                     self.authenticateSession()
                 }
             case .failed(let error):
+                print("TCP conexión falló: \(error.localizedDescription)")
                 DispatchQueue.main.async {
                     self.isConnected = false
                     self.isConnecting = false
-                    self.lastStatusMessage = "Error de conexión: \(error.localizedDescription)"
+                    self.lastStatusMessage = "Reconectando..."
                 }
                 self.cleanupConnection()
+                self.scheduleAutoReconnect(delay: 1.5)
             case .cancelled:
                 DispatchQueue.main.async {
                     self.isConnected = false
                     self.isConnecting = false
-                    self.lastStatusMessage = "Desconectado"
                 }
                 self.cleanupConnection()
+                if !self.isUserDisconnected {
+                    self.scheduleAutoReconnect(delay: 1.0)
+                }
             default:
                 break
             }
@@ -118,21 +182,23 @@ public class CameraManager: ObservableObject {
     }
 
     public func disconnect() {
+        isUserDisconnected = true
+        handshakeTimeoutItem?.cancel()
+        reconnectWorkItem?.cancel()
         if isConnected && sessionToken > 0 {
             sendCommand(msgId: 258, param: nil) // MSG_DISCONNECT
         }
-        stopHeartbeat()
         connection?.cancel()
         cleanupConnection()
     }
 
     private func cleanupConnection() {
+        handshakeTimeoutItem?.cancel()
         queue.async {
             self.connection = nil
             self.receiveBuffer = ""
             self.pendingCallbacks.removeAll()
         }
-        stopHeartbeat()
         DispatchQueue.main.async {
             self.isConnected = false
             self.isConnecting = false
@@ -140,30 +206,24 @@ public class CameraManager: ObservableObject {
         }
     }
 
-    // MARK: - Autenticación y Heartbeat (45s para mantenerla fresca)
+    // MARK: - Autenticación
 
     private func authenticateSession() {
         queue.async {
             let authPacket: [String: Any] = ["msg_id": 257, "token": 0]
             self.sendRawJSON(authPacket)
             self.lastSendTime = Date().timeIntervalSince1970
-        }
-    }
 
-    private func startHeartbeat() {
-        DispatchQueue.main.async {
-            self.heartbeatTimer?.invalidate()
-            self.heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 45.0, repeats: true) { [weak self] _ in
-                guard let self = self, self.isConnected else { return }
-                self.fetchBatteryStatus()
+            // Timeout de apretón de manos (5 segundos)
+            self.handshakeTimeoutItem?.cancel()
+            let timeout = DispatchWorkItem { [weak self] in
+                guard let self = self, !self.isConnected else { return }
+                print("Apretón 257 agotó tiempo, reintentando...")
+                self.cleanupConnection()
+                self.scheduleAutoReconnect(delay: 0.5)
             }
-        }
-    }
-
-    private func stopHeartbeat() {
-        DispatchQueue.main.async {
-            self.heartbeatTimer?.invalidate()
-            self.heartbeatTimer = nil
+            self.handshakeTimeoutItem = timeout
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: timeout)
         }
     }
 
@@ -190,7 +250,7 @@ public class CameraManager: ObservableObject {
             }
 
             if let onResponse = onResponse {
-                self.pendingCallbacks[msgId] = onResponse
+                self.pendingCallbacks[msgId, default: []].append(onResponse)
             }
 
             self.sendRawJSON(packet)
@@ -217,7 +277,11 @@ public class CameraManager: ObservableObject {
                 self.processIncomingChunk(str)
             }
             if isComplete || error != nil {
-                self.disconnect()
+                print("Socket TCP cerrado por cámara (isComplete=\(isComplete), err=\(String(describing: error)))")
+                self.cleanupConnection()
+                if !self.isUserDisconnected {
+                    self.scheduleAutoReconnect(delay: 1.0)
+                }
             } else {
                 self.startReceiving()
             }
@@ -254,25 +318,30 @@ public class CameraManager: ObservableObject {
         let msgId = obj["msg_id"] as? Int ?? 0
         let rval = obj["rval"] as? Int ?? -1
 
-        // Si había un callback esperando este msgId, ejecutarlo
-        if let cb = pendingCallbacks.removeValue(forKey: msgId) {
+        // Si había un callback esperando este msgId, ejecutar el primero en cola (FIFO)
+        var callbackToRun: (([String: Any]) -> Void)? = nil
+        if let list = pendingCallbacks[msgId], !list.isEmpty {
+            callbackToRun = pendingCallbacks[msgId]?.removeFirst()
+        }
+        if let cb = callbackToRun {
             DispatchQueue.main.async { cb(obj) }
         }
 
         DispatchQueue.main.async {
             switch msgId {
             case 257: // CONNECT
+                self.handshakeTimeoutItem?.cancel()
                 if rval == 0, let tok = obj["param"] as? Int {
                     self.sessionToken = tok
                     self.isConnected = true
                     self.isConnecting = false
-                    self.lastStatusMessage = "Cámara Conectada (Token \(tok))"
-                    self.startHeartbeat()
+                    self.lastStatusMessage = "Cámara Conectada"
                     self.syncCameraDate()
                     self.fetchInitialState()
                 } else {
-                    self.lastStatusMessage = "Conexión rechazada por la cámara"
-                    self.disconnect()
+                    self.lastStatusMessage = "Reconectando con la cámara..."
+                    self.cleanupConnection()
+                    self.scheduleAutoReconnect(delay: 1.0)
                 }
 
             case 4361: // BATERÍA
