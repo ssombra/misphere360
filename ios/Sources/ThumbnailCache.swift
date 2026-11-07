@@ -64,8 +64,8 @@ public class ThumbnailCache: ObservableObject {
 
         var req = URLRequest(url: url)
         req.timeoutInterval = 4.0
-        // Para JPG solicitamos un tamaño razonable para miniatura
-        req.setValue("bytes=0-150000", forHTTPHeaderField: "Range")
+        // Solicitar primeros 32 KB donde viene incrustada la miniatura EXIF de 5 KB
+        req.setValue("bytes=0-32768", forHTTPHeaderField: "Range")
 
         let task = URLSession.shared.dataTask(with: req) { [weak self] data, response, _ in
             guard let self = self else { return }
@@ -73,7 +73,7 @@ public class ThumbnailCache: ObservableObject {
 
             // 200 (Completo) o 206 (Partial Content por Range)
             if (statusCode == 200 || statusCode == 206), let data = data, !data.isEmpty {
-                if let thumb = self.downsampleImage(data: data, maxPixelSize: 360) {
+                if let thumb = self.extractThumbnail(data: data) {
                     self.cache.setObject(thumb, forKey: key)
                     DispatchQueue.main.async { completion(thumb) }
                     return
@@ -84,6 +84,33 @@ public class ThumbnailCache: ObservableObject {
             self.tryFetchThumbnail(urls: remaining, key: key, completion: completion)
         }
         task.resume()
+    }
+
+    private func extractThumbnail(data: Data) -> UIImage? {
+        // En los archivos JPG de Xiaomi Mi Sphere, a partir del byte ~1536 se encuentra incrustada
+        // la miniatura EXIF completa de 5 KB delimitada por 0xFFD8 y 0xFFD9
+        if data.count > 10, data[0] == 0xFF, data[1] == 0xD8 {
+            let limit = min(data.count - 1, 65536)
+            var secondSOI: Int? = nil
+            for i in 2..<limit {
+                if data[i] == 0xFF && data[i + 1] == 0xD8 {
+                    secondSOI = i
+                    break
+                }
+            }
+            if let start = secondSOI {
+                for i in (start + 2)..<limit {
+                    if data[i] == 0xFF && data[i + 1] == 0xD9 {
+                        let thumbSlice = data.subdata(in: start..<(i + 2))
+                        if let img = UIImage(data: thumbSlice) {
+                            return img
+                        }
+                        break
+                    }
+                }
+            }
+        }
+        return downsampleImage(data: data, maxPixelSize: 360)
     }
 
     private func downsampleImage(data: Data, maxPixelSize: CGFloat) -> UIImage? {

@@ -473,26 +473,39 @@ struct GalleryView: View {
         isLoading = true
         camera.fetchStorageStatus()
         camera.listDCIMFolders { list in
-            self.folders = list
-            self.loadAllFilesFromFolders(folders: list)
+            let sortedFolders = list.sorted(by: >)
+            self.folders = sortedFolders
+
+            guard let firstFolder = sortedFolders.first else {
+                self.isLoading = false
+                self.allFiles = []
+                return
+            }
+
+            // 1. Cargar la carpeta más reciente INMEDIATAMENTE para mostrar fotos en <0.5s
+            self.camera.listFilesInFolder(firstFolder) { recentItems in
+                self.allFiles = recentItems
+                self.isLoading = false // ¡Apagar el spinner inmediatamente!
+
+                // 2. Cargar las demás carpetas de forma secuencial en segundo plano sin colisión TCP
+                let remainingFolders = Array(sortedFolders.dropFirst())
+                self.loadRemainingFoldersSequentially(remaining: remainingFolders)
+            }
         }
     }
 
-    private func loadAllFilesFromFolders(folders: [String]) {
-        var collected: [SDFileItem] = []
-        let dispatchGroup = DispatchGroup()
-
-        for folder in folders {
-            dispatchGroup.enter()
-            camera.listFilesInFolder(folder) { items in
-                collected.append(contentsOf: items)
-                dispatchGroup.leave()
+    private func loadRemainingFoldersSequentially(remaining: [String]) {
+        guard let nextFolder = remaining.first else { return }
+        camera.listFilesInFolder(nextFolder) { olderItems in
+            if !olderItems.isEmpty {
+                var current = self.allFiles
+                for item in olderItems where !current.contains(where: { $0.id == item.id }) {
+                    current.append(item)
+                }
+                self.allFiles = current.sorted(by: { $0.filename > $1.filename })
             }
-        }
-
-        dispatchGroup.notify(queue: .main) {
-            self.allFiles = collected.sorted(by: { $0.filename > $1.filename })
-            self.isLoading = false
+            // Siguiente carpeta
+            self.loadRemainingFoldersSequentially(remaining: Array(remaining.dropFirst()))
         }
     }
 
