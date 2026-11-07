@@ -32,6 +32,8 @@ public class CameraManager: ObservableObject {
     @Published public var isRecording = false
     @Published public var currentMode: Int = 1 // 1: Foto, 0: Video
     @Published public var lastStatusMessage: String = "Desconectado"
+    @Published public var isLiveViewActive = false
+    @Published public var liveViewStatus = ""
 
     // FOTO
     @Published public var photoRes: Int = 0          // 0: DualFisheye 6912, 1: 3456, 2: 6912, 3: RAW
@@ -459,6 +461,30 @@ public class CameraManager: ObservableObject {
             sendCommand(msgId: 4868, param: nil)
         } else {
             sendCommand(msgId: 4864, param: nil)
+        }
+    }
+
+    public func startLiveView(completion: ((Bool) -> Void)? = nil) {
+        sendCommand(msgId: 259, param: nil) { [weak self] resp in
+            let rval = resp["rval"] as? Int ?? -1
+            let ok = (rval == 0)
+            DispatchQueue.main.async {
+                self?.isLiveViewActive = ok
+                self?.liveViewStatus = ok ? "Transmisión RTSP activa (rtsp://192.168.42.1/live)" : "Error al iniciar RTSP (\(rval))"
+                completion?(ok)
+            }
+        }
+    }
+
+    public func stopLiveView(completion: ((Bool) -> Void)? = nil) {
+        sendCommand(msgId: 260, param: nil) { [weak self] resp in
+            let rval = resp["rval"] as? Int ?? -1
+            let ok = (rval == 0)
+            DispatchQueue.main.async {
+                self?.isLiveViewActive = false
+                self?.liveViewStatus = ""
+                completion?(ok)
+            }
         }
     }
 

@@ -72,87 +72,70 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Barra Superior de Estado
+    // MARK: - Barra Superior de Estado (Limpia y Monocromática)
 
     private var topStatusBar: some View {
         HStack(spacing: 8) {
             // Estado de Conexión
             HStack(spacing: 6) {
                 Circle()
-                    .fill(camera.isConnected ? Color.green : (camera.isConnecting ? Color.orange : Color.red))
-                    .frame(width: 8, height: 8)
+                    .fill(camera.isConnected ? Color.green : (camera.isConnecting ? Color.orange : Color.gray))
+                    .frame(width: 7, height: 7)
                 Text(camera.isConnected ? "Conectada" : (camera.isConnecting ? "Buscando..." : "Sin Wi-Fi"))
-                    .font(.caption)
-                    .fontWeight(.medium)
+                    .font(.system(size: 11.5, weight: .semibold))
                     .foregroundColor(.white)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(cardBg)
-            .cornerRadius(20)
+            .background(.ultraThinMaterial)
+            .background(Color.white.opacity(0.10))
+            .clipShape(Capsule())
 
             // Estado de Batería
             if camera.isConnected {
                 HStack(spacing: 4) {
                     Image(systemName: camera.isCharging ? "battery.100.bolt" : "battery.75")
+                        .font(.system(size: 13))
                         .foregroundColor(camera.isCharging ? .green : .white)
                     Text("\(camera.batteryPercent)%")
-                        .font(.caption)
-                        .fontWeight(.semibold)
+                        .font(.system(size: 11.5, weight: .semibold))
                         .foregroundColor(.white)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(cardBg)
-                .cornerRadius(20)
-            }
-
-            // Indicador de GPS en Tiempo Real (Camino A)
-            HStack(spacing: 4) {
-                Image(systemName: "location.fill")
-                    .foregroundColor(location.hasLocation ? brandOrange : .gray)
-                Text(location.hasLocation ? location.accuracyString : "GPS...")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(location.hasLocation ? brandOrange : .gray)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(cardBg)
-            .cornerRadius(20)
-            .onTapGesture {
-                location.forceSyncGPSWithCamera()
+                .background(.ultraThinMaterial)
+                .background(Color.white.opacity(0.10))
+                .clipShape(Capsule())
             }
 
             Spacer()
 
-            // Botón de Ajustes
+            // Botón de Ajustes (Círculo translúcido blanco)
             Button {
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
                 showSettings = true
             } label: {
                 Image(systemName: "gearshape.fill")
-                    .font(.system(size: 15))
+                    .font(.system(size: 14))
                     .foregroundColor(.white)
-                    .padding(8)
-                    .background(cardBg)
+                    .frame(width: 36, height: 36)
+                    .background(.ultraThinMaterial)
+                    .background(Color.white.opacity(0.10))
                     .clipShape(Circle())
             }
         }
     }
 
-    // MARK: - Área Central
+    // MARK: - Área Central (Live View Bajo Demanda)
 
     private var centralViewfinder: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 22)
-                .fill(cardBg)
-                .frame(maxHeight: 280)
-
             if !camera.isConnected {
                 VStack(spacing: 14) {
                     if camera.isConnecting {
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: brandOrange))
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             .scaleEffect(1.3)
 
                         Text("Enlazando con la cámara...")
@@ -164,8 +147,8 @@ struct ContentView: View {
                             .foregroundColor(.secondary)
                     } else {
                         Image(systemName: "wifi.exclamationmark")
-                            .font(.system(size: 48))
-                            .foregroundColor(brandOrange)
+                            .font(.system(size: 44))
+                            .foregroundColor(.white.opacity(0.85))
 
                         Text("Conéctate al Wi-Fi de la Cámara")
                             .font(.headline)
@@ -182,100 +165,147 @@ struct ContentView: View {
                             Text("Reintentar Conexión")
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
-                                .foregroundColor(.white)
+                                .foregroundColor(.black)
                                 .padding(.horizontal, 20)
-                                .padding(.vertical, 10)
-                                .background(brandOrange)
+                                .padding(.vertical, 9)
+                                .background(Color.white)
                                 .cornerRadius(12)
                         }
                     }
                 }
+                .frame(maxWidth: .infinity)
+                .frame(height: 200)
+                .background(.ultraThinMaterial)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(20)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                )
             } else {
-                VStack(spacing: 12) {
-                    ZStack {
-                        Circle()
-                            .fill(Color(red: 0.15, green: 0.18, blue: 0.26))
-                            .frame(width: 95, height: 95)
-
-                        Image(systemName: camera.currentMode == 1 ? "camera.metering.matrix" : (camera.isRecording ? "record.circle.fill" : "video.fill"))
-                            .font(.system(size: 42))
-                            .foregroundColor(camera.isRecording ? .red : brandOrange)
-                    }
-
-                    VStack(spacing: 4) {
-                        Text(camera.currentMode == 1 ? "FOTO 360°" : (camera.isRecording ? "GRABANDO VIDEO" : "VIDEO 360°"))
-                            .font(.headline)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-
-                        // Badges de Configuración Activa
-                        HStack(spacing: 6) {
-                            Text(camera.currentMode == 1 ? photoResLabel(camera.photoRes) : videoResLabel(camera.videoRes))
-                                .font(.system(size: 10, weight: .bold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(Color(red: 0.18, green: 0.22, blue: 0.32))
-                                .foregroundColor(.white)
-                                .cornerRadius(6)
-
-                            if camera.currentMode == 1 && camera.timer > 0 {
-                                Text("Timer \(camera.timer)s")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 3)
-                                    .background(brandOrange)
-                                    .foregroundColor(.white)
-                                    .cornerRadius(6)
+                if !camera.isLiveViewActive {
+                    // Estado Inactivo: Botón discreto para activar Live View cuando el usuario lo desee
+                    VStack(spacing: 12) {
+                        Button {
+                            let impact = UIImpactFeedbackGenerator(style: .medium)
+                            impact.impactOccurred()
+                            camera.startLiveView()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 13, weight: .bold))
+                                Text("Activar Vista Previa")
+                                    .font(.system(size: 13, weight: .bold))
                             }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 10)
+                            .background(.ultraThinMaterial)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule().stroke(Color.white.opacity(0.20), lineWidth: 0.5)
+                            )
+                        }
+
+                        Text("Transmisión RTSP en vivo bajo demanda")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.45))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 180)
+                    .background(.ultraThinMaterial)
+                    .background(Color.white.opacity(0.06))
+                    .cornerRadius(20)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                    )
+                } else {
+                    // Estado Activo: Transmisión RTSP corriendo en la cámara
+                    VStack(spacing: 12) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 8, height: 8)
+                            Text("Vista Previa en Vivo Activa")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+
+                        Text("rtsp://192.168.42.1/live")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.6))
+
+                        Button {
+                            let impact = UIImpactFeedbackGenerator(style: .light)
+                            impact.impactOccurred()
+                            camera.stopLiveView()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "stop.fill")
+                                    .font(.system(size: 11, weight: .bold))
+                                Text("Detener Vista Previa")
+                                    .font(.system(size: 12, weight: .bold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Color.white.opacity(0.14))
+                            .clipShape(Capsule())
                         }
                     }
-
-                    Text(camera.lastStatusMessage)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    if location.hasLocation {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 11))
-                                .foregroundColor(.green)
-                            Text("GPS Satelital Activo (Inyección directa a EXIF)")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(.green)
-                        }
-                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 180)
+                    .background(.ultraThinMaterial)
+                    .background(Color.white.opacity(0.08))
+                    .cornerRadius(20)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.white.opacity(0.16), lineWidth: 0.5)
+                    )
                 }
-                .padding(.vertical, 12)
             }
         }
     }
 
-    // MARK: - Selector de Modo (FOTO vs VIDEO)
+    // MARK: - Selector de Modo (Íconos Foto y Video)
 
     private var modeSelector: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 8) {
             Button {
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
                 camera.switchMode(1)
             } label: {
-                Text("FOTO")
-                    .font(.subheadline)
-                    .fontWeight(camera.currentMode == 1 ? .bold : .medium)
-                    .foregroundColor(camera.currentMode == 1 ? brandOrange : .gray)
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(camera.currentMode == 1 ? .black : .white.opacity(0.65))
+                    .frame(width: 38, height: 38)
+                    .background(camera.currentMode == 1 ? Color.white : Color.clear)
+                    .clipShape(Circle())
             }
 
             Button {
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
                 camera.switchMode(0)
             } label: {
-                Text("VIDEO")
-                    .font(.subheadline)
-                    .fontWeight(camera.currentMode == 0 ? .bold : .medium)
-                    .foregroundColor(camera.currentMode == 0 ? brandOrange : .gray)
+                Image(systemName: "video.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(camera.currentMode == 0 ? .black : .white.opacity(0.65))
+                    .frame(width: 38, height: 38)
+                    .background(camera.currentMode == 0 ? Color.white : Color.clear)
+                    .clipShape(Circle())
             }
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 8)
-        .background(cardBg)
-        .cornerRadius(18)
+        .padding(4)
+        .background(.ultraThinMaterial)
+        .background(Color.white.opacity(0.10))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+        )
     }
 
     // MARK: - Controles de FOTO
@@ -459,17 +489,22 @@ struct ContentView: View {
         VStack(spacing: 2) {
             Text(title)
                 .font(.system(size: 8, weight: .bold))
-                .foregroundColor(.secondary)
+                .foregroundColor(.white.opacity(0.55))
             Text(value)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.white)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
         .padding(.horizontal, 4)
-        .background(cardBg)
+        .background(.ultraThinMaterial)
+        .background(Color.white.opacity(0.08))
         .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+        )
     }
 
     private func photoResLabel(_ val: Int) -> String {
@@ -502,7 +537,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Barra Inferior con Botón Disparador
+    // MARK: - Barra Inferior con Botón Disparador (Minimalista Monocromático)
 
     private var bottomActionBar: some View {
         HStack {
@@ -511,16 +546,20 @@ struct ContentView: View {
                 showGallery = true
             } label: {
                 Image(systemName: "photo.stack")
-                    .font(.system(size: 22))
+                    .font(.system(size: 21, weight: .medium))
                     .foregroundColor(.white)
                     .frame(width: 52, height: 52)
-                    .background(cardBg)
+                    .background(.ultraThinMaterial)
+                    .background(Color.white.opacity(0.10))
                     .clipShape(Circle())
+                    .overlay(
+                        Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                    )
             }
 
             Spacer()
 
-            // Botón de Disparo Principal
+            // Botón de Disparo Principal (Estilo Clásico Cámara Apple)
             Button {
                 let impact = UIImpactFeedbackGenerator(style: .heavy)
                 impact.impactOccurred()
@@ -534,14 +573,16 @@ struct ContentView: View {
             } label: {
                 ZStack {
                     Circle()
-                        .stroke(Color.white, lineWidth: 4)
+                        .stroke(Color.white, lineWidth: 3.5)
                         .frame(width: 76, height: 76)
 
                     if camera.currentMode == 1 {
+                        // Foto: Círculo blanco puro sólido
                         Circle()
-                            .fill(brandOrange)
+                            .fill(Color.white)
                             .frame(width: 62, height: 62)
                     } else {
+                        // Video: Círculo o cuadrado rojo de grabación estándar
                         if camera.isRecording {
                             RoundedRectangle(cornerRadius: 8)
                                 .fill(Color.red)
@@ -559,6 +600,8 @@ struct ContentView: View {
 
             // Botón de Reconexión / Refresco
             Button {
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
                 if camera.isConnected {
                     camera.refreshStatus()
                 } else {
@@ -566,11 +609,15 @@ struct ContentView: View {
                 }
             } label: {
                 Image(systemName: camera.isConnected ? "arrow.clockwise" : "link.badge.plus")
-                    .font(.system(size: 20))
-                    .foregroundColor(camera.isConnected ? .green : .white)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(.white)
                     .frame(width: 52, height: 52)
-                    .background(cardBg)
+                    .background(.ultraThinMaterial)
+                    .background(Color.white.opacity(0.10))
                     .clipShape(Circle())
+                    .overlay(
+                        Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                    )
             }
         }
     }
