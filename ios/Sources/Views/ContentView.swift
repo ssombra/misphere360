@@ -7,6 +7,11 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showGallery = false
 
+    @State private var latestPhotoItem: SDFileItem? = nil
+    @State private var latestStitchedImage: UIImage? = nil
+    @State private var isLoadingLatestPhoto = false
+    @State private var selectedPreviewItem: SDFileItem? = nil
+
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0) // #FF6700
     private let darkBg = Color(red: 0.05, green: 0.06, blue: 0.09)
     private let cardBg = Color(red: 0.10, green: 0.12, blue: 0.18)
@@ -56,6 +61,14 @@ struct ContentView: View {
         .onAppear {
             location.startTracking()
             camera.checkAndReconnectIfNeeded()
+            if camera.isConnected {
+                loadLatestPhoto()
+            }
+        }
+        .onChange(of: camera.isConnected) { isConnected in
+            if isConnected {
+                loadLatestPhoto()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             camera.checkAndReconnectIfNeeded()
@@ -67,8 +80,12 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showGallery, onDismiss: {
             camera.checkAndReconnectIfNeeded()
+            loadLatestPhoto(force: true)
         }) {
             GalleryView()
+        }
+        .fullScreenCover(item: $selectedPreviewItem) { item in
+            PhotoPreviewView(item: item)
         }
     }
 
@@ -183,36 +200,141 @@ struct ContentView: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
                 )
             } else {
-                // Zona Central limpia: Únicamente el ícono con el texto "Live View"
-                VStack {
-                    Button {
-                        let impact = UIImpactFeedbackGenerator(style: .medium)
-                        impact.impactOccurred()
-                        if camera.isLiveViewActive {
-                            camera.stopLiveView()
-                        } else {
-                            camera.startLiveView()
+                // Zona Central: Visor 360° Interactivo de la Última Captura
+                ZStack {
+                    if let image = latestStitchedImage {
+                        ZStack(alignment: .topLeading) {
+                            Sphere360View(image: image, enableMotion: false)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 200)
+                                .cornerRadius(20)
+                                .clipped()
+
+                            // Cabecera flotante: Etiqueta y botones de acción
+                            HStack {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "globe")
+                                        .font(.system(size: 11, weight: .bold))
+                                    Text("Última Captura 360°")
+                                        .font(.system(size: 11, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(.ultraThinMaterial)
+                                .background(Color.black.opacity(0.40))
+                                .clipShape(Capsule())
+                                .overlay(
+                                    Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                                )
+
+                                Spacer()
+
+                                // Expandir a pantalla completa
+                                if let item = latestPhotoItem {
+                                    Button {
+                                        let impact = UIImpactFeedbackGenerator(style: .medium)
+                                        impact.impactOccurred()
+                                        selectedPreviewItem = item
+                                    } label: {
+                                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                            .font(.system(size: 11, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .frame(width: 28, height: 28)
+                                            .background(.ultraThinMaterial)
+                                            .background(Color.black.opacity(0.40))
+                                            .clipShape(Circle())
+                                            .overlay(
+                                                Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                                            )
+                                    }
+                                }
+
+                                // Recargar última captura
+                                Button {
+                                    let impact = UIImpactFeedbackGenerator(style: .light)
+                                    impact.impactOccurred()
+                                    loadLatestPhoto(force: true)
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .frame(width: 28, height: 28)
+                                        .background(.ultraThinMaterial)
+                                        .background(Color.black.opacity(0.40))
+                                        .clipShape(Circle())
+                                        .overlay(
+                                            Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                                        )
+                                }
+                            }
+                            .padding(10)
+
+                            // Pie flotante con sugerencia de gesto
+                            VStack {
+                                Spacer()
+                                HStack {
+                                    Spacer()
+                                    Text("Arrastra para explorar en 360°")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.70))
+                                        .padding(.horizontal, 9)
+                                        .padding(.vertical, 3)
+                                        .background(Color.black.opacity(0.45))
+                                        .cornerRadius(6)
+                                    Spacer()
+                                }
+                                .padding(.bottom, 8)
+                            }
                         }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: camera.isLiveViewActive ? "video.fill" : "video")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("Live View")
-                                .font(.system(size: 13, weight: .bold))
+                    } else if isLoadingLatestPhoto {
+                        VStack(spacing: 10) {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(1.2)
+                            Text("Cargando captura 360°...")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.85))
                         }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 10)
-                        .background(.ultraThinMaterial)
-                        .background(camera.isLiveViewActive ? Color.white.opacity(0.22) : Color.white.opacity(0.10))
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule().stroke(Color.white.opacity(camera.isLiveViewActive ? 0.35 : 0.18), lineWidth: 0.5)
-                        )
+                    } else {
+                        VStack(spacing: 8) {
+                            Image(systemName: "photo.on.rectangle.angled")
+                                .font(.system(size: 32, weight: .light))
+                                .foregroundColor(.white.opacity(0.65))
+
+                            Text("Visor 360° de Última Captura")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white)
+
+                            Text("Dispara una foto o pulsa cargar para explorar aquí en 360°")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.60))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 24)
+
+                            Button {
+                                let impact = UIImpactFeedbackGenerator(style: .medium)
+                                impact.impactOccurred()
+                                loadLatestPhoto(force: true)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 11, weight: .bold))
+                                    Text("Cargar última foto")
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(Color.white)
+                                .clipShape(Capsule())
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 180)
+                .frame(height: 200)
                 .background(.ultraThinMaterial)
                 .background(Color.white.opacity(0.06))
                 .cornerRadius(20)
@@ -522,6 +644,11 @@ struct ContentView: View {
                 if camera.currentMode == 1 {
                     location.forceSyncGPSWithCamera()
                     camera.takePhoto()
+                    // Esperar a que la cámara guarde el archivo en la microSD para actualizar el visor 360
+                    let delay = Double(camera.timer > 0 ? camera.timer + 2.5 : 2.5)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                        loadLatestPhoto(force: true)
+                    }
                 } else {
                     camera.toggleVideoRecording()
                 }
@@ -573,6 +700,58 @@ struct ContentView: View {
                     .overlay(
                         Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
                     )
+            }
+        }
+    }
+
+    // MARK: - Carga y Cosido de la Última Captura 360° para el Visor Central
+
+    private func loadLatestPhoto(force: Bool = false) {
+        guard camera.isConnected, !isLoadingLatestPhoto else { return }
+        isLoadingLatestPhoto = true
+
+        camera.fetchSDFileList { files in
+            let photoFiles = files.filter { !$0.isVideo }
+            guard let mostRecent = photoFiles.first else {
+                DispatchQueue.main.async {
+                    self.isLoadingLatestPhoto = false
+                }
+                return
+            }
+
+            // Si ya está cargada esta misma foto y no se forzó refresco, no volver a descargar
+            if !force && self.latestPhotoItem?.id == mostRecent.id && self.latestStitchedImage != nil {
+                DispatchQueue.main.async {
+                    self.isLoadingLatestPhoto = false
+                }
+                return
+            }
+
+            self.latestPhotoItem = mostRecent
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                let cleanFolder = mostRecent.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                let filename = mostRecent.filename
+                let clean = filename.hasSuffix("AA.JPG") ? String(filename.dropLast(6)) + ".JPG" : filename
+                let urlString = "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)/DCIM/\(cleanFolder)/\(clean)"
+
+                guard let url = URL(string: urlString),
+                      let data = try? Data(contentsOf: url) else {
+                    DispatchQueue.main.async {
+                        self.isLoadingLatestPhoto = false
+                    }
+                    return
+                }
+
+                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("latest_preview_\(UUID().uuidString).JPG")
+                try? data.write(to: tempURL)
+                let stitched = PhotoStitcher.shared.stitchForInteractivePreview(from: tempURL, maxPixelSize: 2048)
+                try? FileManager.default.removeItem(at: tempURL)
+
+                DispatchQueue.main.async {
+                    self.latestStitchedImage = stitched
+                    self.isLoadingLatestPhoto = false
+                }
             }
         }
     }

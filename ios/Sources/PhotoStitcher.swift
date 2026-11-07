@@ -110,7 +110,7 @@ public class PhotoStitcher {
     }
 
     /// Cose rápidamente para vista previa interactiva a pantalla completa en <0.3s (máximo 4K)
-    public func stitchForInteractivePreview(from localURL: URL) -> UIImage? {
+    public func stitchForInteractivePreview(from localURL: URL, maxPixelSize: CGFloat = 3840) -> UIImage? {
         guard let data = try? Data(contentsOf: localURL) else { return nil }
         let info = parseJpegInfo(data)
 
@@ -122,11 +122,11 @@ public class PhotoStitcher {
         if info.isDualFisheye, let lut = lutURL, fileManager.fileExists(atPath: lut.path) {
             let status = stitch_dual_fisheye_c(localURL.path, lut.path, outURL.path)
             if status == 0 {
-                return downsampleImageSource(from: outURL, maxPixelSize: 3840)
+                return downsampleImageSource(from: outURL, maxPixelSize: maxPixelSize)
             }
         }
 
-        return downsampleImageSource(from: localURL, maxPixelSize: 3840)
+        return downsampleImageSource(from: localURL, maxPixelSize: maxPixelSize)
     }
 
     private func downsampleImageSource(from fileURL: URL, maxPixelSize: CGFloat) -> UIImage? {

@@ -347,10 +347,9 @@ public class CameraManager: ObservableObject {
                 }
 
             case 4361: // BATERÍA
-                if let raw = obj["param"] as? Int {
-                    self.isCharging = raw > 100
-                    let pct = raw >= 128 ? raw - 128 : raw
-                    self.batteryPercent = max(0, min(100, pct))
+                let rawVal: Int? = (obj["param"] as? Int) ?? (Int(obj["param"] as? String ?? ""))
+                if let raw = rawVal {
+                    self.updateBattery(from: raw)
                 }
 
             case 4358: // ALMACENAMIENTO SD
@@ -360,6 +359,7 @@ public class CameraManager: ObservableObject {
                 if let rvid = obj["remain_video"] as? Int { self.remainVideo = rvid }
 
             case 4364: // GET_DEVICE
+                if let b = obj["battery"] as? Int { self.updateBattery(from: b) }
                 if let pres = obj["p_res"] as? Int { self.photoRes = pres }
                 if let vres = obj["v_res"] as? Int { self.videoRes = vres }
                 if let wb = obj["still_wb"] as? Int { self.wb = wb }
@@ -434,6 +434,25 @@ public class CameraManager: ObservableObject {
 
     public func fetchBatteryStatus() {
         sendCommand(msgId: 4361, param: nil)
+    }
+
+    private func updateBattery(from raw: Int) {
+        let isCharging = (raw & 0x80) != 0 || raw > 100
+        let level = raw & 0x0F
+        let pct: Int
+        if level <= 4 {
+            switch level {
+            case 4: pct = 100
+            case 3: pct = 75
+            case 2: pct = 50
+            case 1: pct = 25
+            default: pct = 5
+            }
+        } else {
+            pct = max(0, min(100, raw >= 128 ? raw - 128 : raw))
+        }
+        self.isCharging = isCharging
+        self.batteryPercent = pct
     }
 
     public func fetchStorageStatus() {
