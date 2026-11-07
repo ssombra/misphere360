@@ -86,6 +86,40 @@ public class PhotoStitcher {
         }
     }
 
+    /// Genera una miniatura panorámica 360° cosida y optimizada para la cuadrícula de la galería
+    public func generateStitchedThumbnail(from inputURL: URL, maxPixelSize: CGFloat = 480) -> UIImage? {
+        guard let data = try? Data(contentsOf: inputURL) else { return nil }
+
+        let stitchedURL = processPhotoTo360(inputURL: inputURL, data: data) ?? inputURL
+        defer {
+            if stitchedURL != inputURL {
+                try? FileManager.default.removeItem(at: stitchedURL)
+            }
+        }
+
+        return downsampleImageSource(from: stitchedURL, maxPixelSize: maxPixelSize)
+    }
+
+    private func downsampleImageSource(from fileURL: URL, maxPixelSize: CGFloat) -> UIImage? {
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, options) else {
+            return UIImage(contentsOfFile: fileURL.path)
+        }
+
+        let thumbOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+        ]
+
+        if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) {
+            return UIImage(cgImage: cgImage)
+        }
+
+        return UIImage(contentsOfFile: fileURL.path)
+    }
+
     /// Incrusta el bloque EXIF GPS oficial en el archivo JPEG sin recomprimir los píxeles
     public func embedGPS(into imageURL: URL, location: CLLocation) {
         guard let src = CGImageSourceCreateWithURL(imageURL as CFURL, nil),

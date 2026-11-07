@@ -210,6 +210,12 @@ public class ThumbnailCache: ObservableObject {
     }
 
     private func generateOptimizedThumbnail(from fileURL: URL) -> UIImage? {
+        // Cose ópticamente el doble ojo de pez a un panorama 360° rectangular estilo Insta360
+        if let stitched = PhotoStitcher.shared.generateStitchedThumbnail(from: fileURL, maxPixelSize: 480) {
+            return stitched
+        }
+
+        // Fallback en caso de que sea video o falle el cosido C
         let imageSourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let imageSource = CGImageSourceCreateWithURL(fileURL as CFURL, imageSourceOptions) else {
             return nil
@@ -219,7 +225,7 @@ public class ThumbnailCache: ObservableObject {
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceShouldCacheImmediately: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: 360
+            kCGImageSourceThumbnailMaxPixelSize: 480
         ]
 
         guard let cgThumb = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, downsampledOptions as CFDictionary) else {
