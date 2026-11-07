@@ -112,22 +112,18 @@ public struct Web360Viewer: UIViewRepresentable {
 
             if enable {
                 guard motionManager.isDeviceMotionAvailable else { return }
-                motionManager.deviceMotionUpdateInterval = 1.0 / 60.0
-                lastAttitude = nil
-                motionManager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
+                motionManager.deviceMotionUpdateInterval = 1.0 / 30.0
+                motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] motion, _ in
                     guard let self = self, let motion = motion else { return }
-                    if let prev = self.lastAttitude {
-                        motion.attitude.multiply(byInverseOf: prev)
-                        let dYaw = Float(motion.attitude.yaw)
-                        let dPitch = Float(motion.attitude.pitch)
-                        let js = "window.applyGyroDelta && window.applyGyroDelta(\(-dYaw), \(-dPitch));"
-                        self.webView?.evaluateJavaScript(js, completionHandler: nil)
-                    }
-                    self.lastAttitude = motion.attitude.copy() as? CMAttitude
+                    let m = motion.attitude.rotationMatrix
+                    let yaw = Float(atan2(m.m13, -m.m23))
+                    let pitch = Float(asin(max(-1.0, min(1.0, -m.m33))))
+                    let js = "window.setGyroOrientation && window.setGyroOrientation(\(yaw), \(pitch));"
+                    self.webView?.evaluateJavaScript(js, completionHandler: nil)
                 }
             } else {
                 motionManager.stopDeviceMotionUpdates()
-                lastAttitude = nil
+                webView?.evaluateJavaScript("window.disableGyro && window.disableGyro();", completionHandler: nil)
             }
         }
     }
@@ -149,6 +145,9 @@ public struct Web360Viewer: UIViewRepresentable {
         <script>
           let gl, prog, tex;
           let yaw = 0.0, pitch = 0.0, fovDeg = 75.0;
+          let gyroYaw = 0.0, gyroPitch = 0.0;
+          let gyroOffsetYaw = 0.0, gyroOffsetPitch = 0.0;
+          let isGyroEnabled = false;
           let dragging = false, lastX = 0, lastY = 0;
           let lastDist = 0;
           let hasImage = false;
@@ -244,8 +243,13 @@ public struct Web360Viewer: UIViewRepresentable {
                 lastX = e.touches[0].clientX;
                 lastY = e.touches[0].clientY;
                 const sens = (fovDeg / 75.0) * 0.0035;
-                yaw -= dx * sens;
-                pitch = Math.max(-1.52, Math.min(1.52, pitch + dy * sens));
+                if (isGyroEnabled) {
+                  gyroOffsetYaw -= dx * sens;
+                  gyroOffsetPitch = Math.max(-1.50, Math.min(1.50, gyroOffsetPitch + dy * sens));
+                } else {
+                  yaw -= dx * sens;
+                  pitch = Math.max(-1.52, Math.min(1.52, pitch + dy * sens));
+                }
               } else if (e.touches.length === 2) {
                 const dist = Math.hypot(
                   e.touches[0].clientX - e.touches[1].clientX,
@@ -272,6 +276,8 @@ public struct Web360Viewer: UIViewRepresentable {
                 yaw = 0.0;
                 pitch = 0.0;
                 fovDeg = 75.0;
+                gyroOffsetYaw = -gyroYaw;
+                gyroOffsetPitch = -gyroPitch;
               }
               lastTapTime = now;
             });
@@ -289,13 +295,32 @@ public struct Web360Viewer: UIViewRepresentable {
             img.src = "data:image/jpeg;base64," + b64;
           };
 
-          window.applyGyroDelta = function(dYaw, dPitch) {
-            yaw += dYaw;
-            pitch = Math.max(-1.52, Math.min(1.52, pitch + dPitch));
+          window.setGyroOrientation = function(y, p) {
+            if (!isGyroEnabled) {
+              gyroOffsetYaw = yaw - y;
+              gyroOffsetPitch = pitch - p;
+              isGyroEnabled = true;
+            }
+            gyroYaw = y;
+            gyroPitch = p;
+          };
+
+          window.disableGyro = function() {
+            isGyroEnabled = false;
           };
 
           function render() {
             if (gl && hasImage) {
+              if (isGyroEnabled && !dragging) {
+                let targetY = gyroYaw + gyroOffsetYaw;
+                let diffY = targetY - yaw;
+                diffY = ((diffY + Math.PI) % (2.0 * Math.PI)) - Math.PI;
+                yaw += diffY * 0.22;
+
+                let targetP = Math.max(-1.50, Math.min(1.50, gyroPitch + gyroOffsetPitch));
+                pitch += (targetP - pitch) * 0.22;
+              }
+
               const canvas = document.getElementById("c");
               const dpr = Math.min(window.devicePixelRatio || 1, 2);
               const w = Math.floor(canvas.clientWidth * dpr);

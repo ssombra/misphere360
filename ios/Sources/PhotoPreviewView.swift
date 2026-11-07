@@ -204,16 +204,18 @@ public struct PhotoPreviewView: View {
         isLoading = true
         loadingMessage = "Descargando para vista previa 360°..."
 
-        // Descargar la foto a un archivo temporal
+        // Descargar la foto a un archivo temporal (priorizando /DCIM que es donde sirve Cherokee)
         let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let nameVariants = ["\(item.filename.dropLast(4))AA.JPG", item.filename]
-        let prefixes = ["", "/DCIM", "/SD0/DCIM", "/tmp/SD0/DCIM"]
+        let nameVariants = ["\(item.filename.dropLast(4))AA.JPG", item.filename, "\(item.filename.dropLast(4))aa.jpg"]
+        let prefixes = ["/DCIM", "", "/SD0/DCIM", "/tmp/SD0/DCIM"]
 
         var candidateURLs: [URL] = []
         for p in prefixes {
             for v in nameVariants {
                 if let u = URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)\(p)/\(cleanFolder)/\(v)") {
-                    candidateURLs.append(u)
+                    if !candidateURLs.contains(u) {
+                        candidateURLs.append(u)
+                    }
                 }
             }
         }
@@ -233,13 +235,13 @@ public struct PhotoPreviewView: View {
         let remaining = Array(urls.dropFirst())
 
         var req = URLRequest(url: url)
-        req.timeoutInterval = 15.0
+        req.timeoutInterval = 3.5
 
         URLSession.shared.downloadTask(with: req) { localURL, resp, _ in
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if status == 200, let localURL = localURL {
                 DispatchQueue.main.async {
-                    self.loadingMessage = "Cosiendo esfera 360° interactiva..."
+                    self.loadingMessage = "Cosiendo esfera 360°..."
                 }
 
                 // Copiar a temporal seguro
@@ -255,30 +257,18 @@ public struct PhotoPreviewView: View {
                     return
                 }
 
-                // Coser en segundo plano
+                // Coser en segundo plano en <0.3s optimizado para pantalla
                 DispatchQueue.global(qos: .userInitiated).async {
-                    let loc = LocationManager.shared.getBestLocation(for: self.item.filename)
-                    let processed = PhotoStitcher.shared.processDownloadedFile(
-                        at: tempURL,
-                        isVideo: self.item.isVideo,
-                        mode: .stitched360,
-                        location: loc
-                    )
+                    let previewImg = PhotoStitcher.shared.stitchForInteractivePreview(from: tempURL)
+                    try? FileManager.default.removeItem(at: tempURL)
 
-                    let finalURL = processed.first ?? tempURL
-                    if let data = try? Data(contentsOf: finalURL), let uiImg = UIImage(data: data) {
-                        try? FileManager.default.removeItem(at: tempURL)
-                        if finalURL != tempURL {
-                            try? FileManager.default.removeItem(at: finalURL)
-                        }
-                        DispatchQueue.main.async {
-                            self.stitchedImage = uiImg
+                    DispatchQueue.main.async {
+                        if let img = previewImg {
+                            self.stitchedImage = img
                             self.isLoading = false
-                        }
-                    } else {
-                        DispatchQueue.main.async {
+                        } else {
                             self.isLoading = false
-                            self.errorMessage = "No se pudo decodificar la imagen 360°."
+                            self.errorMessage = "No se pudo generar la vista 360°."
                         }
                     }
                 }

@@ -33,7 +33,14 @@ public class ThumbnailCache: ObservableObject {
     }
 
     private func diskFileURL(for key: String) -> URL {
-        return diskCacheURL.appendingPathComponent("\(key).jpg")
+        return diskCacheURL.appendingPathComponent("\(key)_pano.jpg")
+    }
+
+    /// Borra toda la caché en memoria y disco (útil para regenerar miniaturas cosidas)
+    public func clearAllCache() {
+        memoryCache.removeAllObjects()
+        try? FileManager.default.removeItem(at: diskCacheURL)
+        try? FileManager.default.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
     }
 
     /// Obtiene miniatura de memoria o disco síncronamente si ya existe

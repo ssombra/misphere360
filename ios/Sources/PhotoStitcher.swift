@@ -101,6 +101,26 @@ public class PhotoStitcher {
         return downsampleImageSource(from: stitchedURL, maxPixelSize: maxPixelSize)
     }
 
+    /// Cose rápidamente para vista previa interactiva a pantalla completa en <0.3s (máximo 4K)
+    public func stitchForInteractivePreview(from localURL: URL) -> UIImage? {
+        guard let data = try? Data(contentsOf: localURL) else { return nil }
+        let info = parseJpegInfo(data)
+
+        let fileManager = FileManager.default
+        let outName = "MiSphere_preview_raw_\(UUID().uuidString).JPG"
+        let outURL = fileManager.temporaryDirectory.appendingPathComponent(outName)
+        defer { try? fileManager.removeItem(at: outURL) }
+
+        if info.isDualFisheye, let lut = lutURL, fileManager.fileExists(atPath: lut.path) {
+            let status = stitch_dual_fisheye_c(localURL.path, lut.path, outURL.path)
+            if status == 0 {
+                return downsampleImageSource(from: outURL, maxPixelSize: 3840)
+            }
+        }
+
+        return downsampleImageSource(from: localURL, maxPixelSize: 3840)
+    }
+
     private func downsampleImageSource(from fileURL: URL, maxPixelSize: CGFloat) -> UIImage? {
         let options = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, options) else {

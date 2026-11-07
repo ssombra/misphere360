@@ -7,6 +7,7 @@ struct SettingsView: View {
     @State private var autoOffMinutes = 10
     @State private var buzzerLevel = 4
     @State private var ledEnabled = true
+    @State private var showCacheAlert = false
 
     var body: some View {
         NavigationView {
@@ -54,6 +55,15 @@ struct SettingsView: View {
                     }
                 }
 
+                Section(header: Text("Almacenamiento Local del iPhone")) {
+                    Button(role: .destructive) {
+                        ThumbnailCache.shared.clearAllCache()
+                        showCacheAlert = true
+                    } label: {
+                        Label("Borrar Caché de Miniaturas", systemImage: "trash")
+                    }
+                }
+
                 Section(header: Text("Acerca de")) {
                     HStack {
                         Text("Modelo")
@@ -74,6 +84,11 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+            }
+            .alert("Caché Borrado", isPresented: $showCacheAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Se eliminaron las miniaturas guardadas. La galería generará versiones cosidas 360° actualizadas.")
             }
             .navigationTitle("Ajustes de Cámara")
             .navigationBarTitleDisplayMode(.inline)
