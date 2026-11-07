@@ -115,9 +115,18 @@ public struct Web360Viewer: UIViewRepresentable {
                 motionManager.deviceMotionUpdateInterval = 1.0 / 30.0
                 motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] motion, _ in
                     guard let self = self, let motion = motion else { return }
-                    let m = motion.attitude.rotationMatrix
-                    let yaw = Float(atan2(m.m13, -m.m23))
-                    let pitch = Float(asin(max(-1.0, min(1.0, -m.m33))))
+                    let q = motion.attitude.quaternion
+
+                    // Vector forward de la cámara del iPhone (-Z del dispositivo) en coordenadas de mundo con Z vertical
+                    let dirX = -2.0 * (q.x * q.z + q.w * q.y)
+                    let dirY = -2.0 * (q.y * q.z - q.w * q.x)
+                    let dirZ = 2.0 * (q.x * q.x + q.y * q.y) - 1.0
+
+                    // Yaw = rotación horizontal completa 360° (derecha/izquierda)
+                    // Pitch = elevación vertical arriba/abajo
+                    let yaw = Float(atan2(dirX, dirY))
+                    let pitch = Float(asin(max(-1.0, min(1.0, dirZ))))
+
                     let js = "window.setGyroOrientation && window.setGyroOrientation(\(yaw), \(pitch));"
                     self.webView?.evaluateJavaScript(js, completionHandler: nil)
                 }
@@ -222,13 +231,21 @@ public struct Web360Viewer: UIViewRepresentable {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
             // Controles táctiles idénticos a la app web de Mac
+            let touchStartX = 0, touchStartY = 0;
+            let hasDragged = false, isPinching = false;
+            let lastTapTime = 0;
+
             canvas.addEventListener("touchstart", e => {
               if (e.touches.length === 1) {
                 dragging = true;
+                hasDragged = false;
                 lastX = e.touches[0].clientX;
                 lastY = e.touches[0].clientY;
+                touchStartX = lastX;
+                touchStartY = lastY;
               } else if (e.touches.length === 2) {
                 dragging = false;
+                isPinching = true;
                 lastDist = Math.hypot(
                   e.touches[0].clientX - e.touches[1].clientX,
                   e.touches[0].clientY - e.touches[1].clientY
@@ -242,6 +259,11 @@ public struct Web360Viewer: UIViewRepresentable {
                 const dy = e.touches[0].clientY - lastY;
                 lastX = e.touches[0].clientX;
                 lastY = e.touches[0].clientY;
+
+                if (Math.hypot(e.touches[0].clientX - touchStartX, e.touches[0].clientY - touchStartY) > 8) {
+                  hasDragged = true;
+                }
+
                 const sens = (fovDeg / 75.0) * 0.0035;
                 if (isGyroEnabled) {
                   gyroOffsetYaw -= dx * sens;
@@ -251,35 +273,51 @@ public struct Web360Viewer: UIViewRepresentable {
                   pitch = Math.max(-1.52, Math.min(1.52, pitch + dy * sens));
                 }
               } else if (e.touches.length === 2) {
+                isPinching = true;
                 const dist = Math.hypot(
                   e.touches[0].clientX - e.touches[1].clientX,
                   e.touches[0].clientY - e.touches[1].clientY
                 );
                 if (lastDist > 0) {
                   const factor = dist / lastDist;
-                  fovDeg = Math.max(30, Math.min(110, fovDeg / factor));
+                  fovDeg = Math.max(25.0, Math.min(115.0, fovDeg / factor));
                 }
                 lastDist = dist;
               }
             }, { passive: true });
 
-            canvas.addEventListener("touchend", () => {
-              dragging = false;
-              lastDist = 0;
-            });
-
-            // Doble toque para centrar vista
-            let lastTapTime = 0;
             canvas.addEventListener("touchend", e => {
-              const now = Date.now();
-              if (now - lastTapTime < 300) {
-                yaw = 0.0;
-                pitch = 0.0;
-                fovDeg = 75.0;
-                gyroOffsetYaw = -gyroYaw;
-                gyroOffsetPitch = -gyroPitch;
+              if (e.touches.length === 0) {
+                dragging = false;
+                lastDist = 0;
+
+                // Solo procesar como doble toque si fue un toque en el mismo lugar: SIN arrastrar y SIN pellizcar
+                if (!hasDragged && !isPinching) {
+                  const now = Date.now();
+                  if (now - lastTapTime < 300) {
+                    yaw = 0.0;
+                    pitch = 0.0;
+                    fovDeg = 75.0;
+                    gyroOffsetYaw = -gyroYaw;
+                    gyroOffsetPitch = -gyroPitch;
+                    lastTapTime = 0;
+                  } else {
+                    lastTapTime = now;
+                  }
+                } else {
+                  lastTapTime = 0;
+                }
+
+                hasDragged = false;
+                isPinching = false;
+              } else if (e.touches.length === 1) {
+                // Al soltar un dedo tras un zoom de dos dedos, actualizar anclaje
+                lastDist = 0;
+                lastX = e.touches[0].clientX;
+                lastY = e.touches[0].clientY;
+                touchStartX = lastX;
+                touchStartY = lastY;
               }
-              lastTapTime = now;
             });
 
             requestAnimationFrame(render);
