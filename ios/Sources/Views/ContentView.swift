@@ -645,7 +645,7 @@ struct ContentView: View {
                     location.forceSyncGPSWithCamera()
                     camera.takePhoto()
                     // Esperar a que la cámara guarde el archivo en la microSD para actualizar el visor 360
-                    let delay = Double(camera.timer > 0 ? camera.timer + 2.5 : 2.5)
+                    let delay: Double = camera.timer > 0 ? Double(camera.timer) + 2.5 : 2.5
                     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                         loadLatestPhoto(force: true)
                     }

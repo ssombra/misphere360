@@ -682,6 +682,19 @@ public class CameraManager: ObservableObject {
         }
     }
 
+    public func fetchSDFileList(completion: @escaping ([SDFileItem]) -> Void) {
+        listDCIMFolders { folders in
+            let sortedFolders = folders.sorted(by: >)
+            guard let latestFolder = sortedFolders.first else {
+                completion([])
+                return
+            }
+            self.listFilesInFolder(latestFolder) { files in
+                completion(files)
+            }
+        }
+    }
+
     public func deleteSDFile(folder: String, filename: String, completion: @escaping (Bool) -> Void) {
         let cleanFolder = folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         var variants = [filename]
