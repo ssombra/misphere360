@@ -137,7 +137,7 @@ public class ThumbnailCache: ObservableObject {
             thmNames.append("\(stem).thm")
         }
 
-        var prefixes = ["/DCIM", "", "/SD0/DCIM"]
+        let prefixes = ["/DCIM", "", "/SD0/DCIM"]
         var candidateURLs: [URL] = []
         for p in prefixes {
             for t in thmNames {
