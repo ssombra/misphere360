@@ -183,88 +183,43 @@ struct ContentView: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
                 )
             } else {
-                if !camera.isLiveViewActive {
-                    // Estado Inactivo: Botón discreto para activar Live View cuando el usuario lo desee
-                    VStack(spacing: 12) {
-                        Button {
-                            let impact = UIImpactFeedbackGenerator(style: .medium)
-                            impact.impactOccurred()
-                            camera.startLiveView()
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 13, weight: .bold))
-                                Text("Activar Vista Previa")
-                                    .font(.system(size: 13, weight: .bold))
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 10)
-                            .background(.ultraThinMaterial)
-                            .background(Color.white.opacity(0.12))
-                            .clipShape(Capsule())
-                            .overlay(
-                                Capsule().stroke(Color.white.opacity(0.20), lineWidth: 0.5)
-                            )
-                        }
-
-                        Text("Transmisión RTSP en vivo bajo demanda")
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.45))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 180)
-                    .background(.ultraThinMaterial)
-                    .background(Color.white.opacity(0.06))
-                    .cornerRadius(20)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
-                    )
-                } else {
-                    // Estado Activo: Transmisión RTSP corriendo en la cámara
-                    VStack(spacing: 12) {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 8, height: 8)
-                            Text("Vista Previa en Vivo Activa")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.white)
-                        }
-
-                        Text("rtsp://192.168.42.1/live")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.6))
-
-                        Button {
-                            let impact = UIImpactFeedbackGenerator(style: .light)
-                            impact.impactOccurred()
+                // Zona Central limpia: Únicamente el ícono con el texto "Live View"
+                VStack {
+                    Button {
+                        let impact = UIImpactFeedbackGenerator(style: .medium)
+                        impact.impactOccurred()
+                        if camera.isLiveViewActive {
                             camera.stopLiveView()
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "stop.fill")
-                                    .font(.system(size: 11, weight: .bold))
-                                Text("Detener Vista Previa")
-                                    .font(.system(size: 12, weight: .bold))
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(Color.white.opacity(0.14))
-                            .clipShape(Capsule())
+                        } else {
+                            camera.startLiveView()
                         }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: camera.isLiveViewActive ? "video.fill" : "video")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("Live View")
+                                .font(.system(size: 13, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial)
+                        .background(camera.isLiveViewActive ? Color.white.opacity(0.22) : Color.white.opacity(0.10))
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule().stroke(Color.white.opacity(camera.isLiveViewActive ? 0.35 : 0.18), lineWidth: 0.5)
+                        )
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 180)
-                    .background(.ultraThinMaterial)
-                    .background(Color.white.opacity(0.08))
-                    .cornerRadius(20)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.white.opacity(0.16), lineWidth: 0.5)
-                    )
                 }
+                .frame(maxWidth: .infinity)
+                .frame(height: 180)
+                .background(.ultraThinMaterial)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(20)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                )
             }
         }
     }
