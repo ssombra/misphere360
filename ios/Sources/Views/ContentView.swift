@@ -96,7 +96,7 @@ struct ContentView: View {
             GalleryView()
         }
         .fullScreenCover(item: $selectedPreviewItem) { item in
-            PhotoPreviewView(item: item)
+            PhotoPreviewView(item: item, initialImage: latestStitchedImage)
         }
     }
 
@@ -215,7 +215,7 @@ struct ContentView: View {
                 ZStack {
                     if let image = latestStitchedImage {
                         ZStack(alignment: .topLeading) {
-                            Sphere360View(image: image, enableMotion: false)
+                            Web360Viewer(image: image, enableMotion: false)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 200)
                                 .cornerRadius(20)
@@ -725,6 +725,13 @@ struct ContentView: View {
 
     // MARK: - Carga y Cosido de la Última Captura 360° para el Visor Central
 
+    private func previewCacheURL(for item: SDFileItem) -> URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Previews", isDirectory: true)
+        try? FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
+        let safe = "\(item.folder)_\(item.filename)".replacingOccurrences(of: "/", with: "_")
+        return caches.appendingPathComponent("\(safe)_preview.jpg")
+    }
+
     private func loadLatestPhoto(force: Bool = false) {
         guard camera.isConnected, !isLoadingLatestPhoto else { return }
         isLoadingLatestPhoto = true
@@ -740,9 +747,20 @@ struct ContentView: View {
                 return
             }
 
-            // Si ya está cargada esta misma foto y no se forzó refresco, no volver a descargar
+            // 1. Si ya está cargada en memoria y no se forzó refresco, terminar de inmediato
             if !force && self.latestPhotoItem?.id == mostRecent.id && self.latestStitchedImage != nil {
                 DispatchQueue.main.async {
+                    self.isLoadingLatestPhoto = false
+                }
+                return
+            }
+
+            // 2. Si ya está guardada en la caché local del dispositivo, cargarla en milisegundos sin red
+            let cacheFile = self.previewCacheURL(for: mostRecent)
+            if !force, let cachedData = try? Data(contentsOf: cacheFile), let cachedImg = UIImage(data: cachedData) {
+                DispatchQueue.main.async {
+                    self.latestPhotoItem = mostRecent
+                    self.latestStitchedImage = cachedImg
                     self.isLoadingLatestPhoto = false
                 }
                 return
@@ -767,11 +785,14 @@ struct ContentView: View {
                 }
 
                 DispatchQueue.global(qos: .userInitiated).async {
-                    let stitched = PhotoStitcher.shared.stitchForInteractivePreview(from: localURL, maxPixelSize: 2048)
+                    let stitched = PhotoStitcher.shared.stitchForInteractivePreview(from: localURL, maxPixelSize: 1536)
                     try? FileManager.default.removeItem(at: localURL)
 
                     DispatchQueue.main.async {
                         if let stitched = stitched {
+                            if let data = stitched.jpegData(compressionQuality: 0.85) {
+                                try? data.write(to: cacheFile)
+                            }
                             self.latestStitchedImage = stitched
                             self.loadErrorMessage = nil
                         } else {

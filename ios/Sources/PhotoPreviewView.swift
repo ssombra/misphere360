@@ -4,12 +4,13 @@ import CoreLocation
 /// Previsualización a pantalla completa en 360° interactiva antes de descargar la foto
 public struct PhotoPreviewView: View {
     let item: SDFileItem
+    var initialImage: UIImage? = nil
     var onDownloadRequested: ((StitchMode) -> Void)?
     var onDeleteRequested: (() -> Void)?
     @Environment(\.dismiss) var dismiss
 
-    @State private var stitchedImage: UIImage? = nil
-    @State private var isLoading = true
+    @State private var stitchedImage: UIImage?
+    @State private var isLoading: Bool
     @State private var loadingMessage = "Cargando foto desde la cámara..."
     @State private var enableGyro = false
     @State private var showDeleteConfirm = false
@@ -18,6 +19,20 @@ public struct PhotoPreviewView: View {
     @State private var errorMessage: String? = nil
 
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0)
+
+    public init(
+        item: SDFileItem,
+        initialImage: UIImage? = nil,
+        onDownloadRequested: ((StitchMode) -> Void)? = nil,
+        onDeleteRequested: (() -> Void)? = nil
+    ) {
+        self.item = item
+        self.initialImage = initialImage
+        self.onDownloadRequested = onDownloadRequested
+        self.onDeleteRequested = onDeleteRequested
+        _stitchedImage = State(initialValue: initialImage)
+        _isLoading = State(initialValue: initialImage == nil)
+    }
 
     private var formattedFileSize: String {
         if let size = downloadedFileSize, size > 0 {
@@ -178,7 +193,9 @@ public struct PhotoPreviewView: View {
             }
         }
         .onAppear {
-            loadAndStitchPreview()
+            if stitchedImage == nil {
+                loadAndStitchPreview()
+            }
         }
         .alert("¿Eliminar archivo de la microSD?", isPresented: $showDeleteConfirm) {
             Button("Cancelar", role: .cancel) {}
@@ -198,85 +215,41 @@ public struct PhotoPreviewView: View {
         isLoading = true
         loadingMessage = "Descargando para vista previa 360°..."
 
-        // Descargar la foto a un archivo temporal (priorizando /DCIM que es donde sirve Cherokee)
-        let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let nameVariants = ["\(item.filename.dropLast(4))AA.JPG", item.filename, "\(item.filename.dropLast(4))aa.jpg"]
-        let prefixes = ["/DCIM", "", "/SD0/DCIM", "/tmp/SD0/DCIM"]
+        MediaDownloader.shared.downloadToTemporaryFile(item: item) { localURL in
+            guard let localURL = localURL else {
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    self.errorMessage = "No se pudo cargar la vista previa. Comprueba la conexión Wi-Fi con la cámara."
+                }
+                return
+            }
 
-        var candidateURLs: [URL] = []
-        for p in prefixes {
-            for v in nameVariants {
-                if let u = URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)\(p)/\(cleanFolder)/\(v)") {
-                    if !candidateURLs.contains(u) {
-                        candidateURLs.append(u)
-                    }
+            if let attr = try? FileManager.default.attributesOfItem(atPath: localURL.path),
+               let size = attr[.size] as? Int64 {
+                DispatchQueue.main.async {
+                    self.downloadedFileSize = size
                 }
             }
-        }
 
-        downloadCandidate(urls: candidateURLs)
-    }
-
-    private func downloadCandidate(urls: [URL]) {
-        guard let url = urls.first else {
             DispatchQueue.main.async {
-                self.isLoading = false
-                self.errorMessage = "No se pudo cargar la vista previa. Comprueba la conexión Wi-Fi con la cámara."
+                self.loadingMessage = "Cosiendo esfera 360°..."
             }
-            return
-        }
 
-        let remaining = Array(urls.dropFirst())
-
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 3.5
-
-        URLSession.shared.downloadTask(with: req) { localURL, resp, _ in
-            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            if status == 200, let localURL = localURL {
-                if let attr = try? FileManager.default.attributesOfItem(atPath: localURL.path),
-                   let size = attr[.size] as? Int64 {
-                    DispatchQueue.main.async {
-                        self.downloadedFileSize = size
-                    }
-                }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let previewImg = PhotoStitcher.shared.stitchForInteractivePreview(from: localURL, maxPixelSize: 3840)
+                try? FileManager.default.removeItem(at: localURL)
 
                 DispatchQueue.main.async {
-                    self.loadingMessage = "Cosiendo esfera 360°..."
-                }
-
-                // Copiar a temporal seguro
-                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("preview_\(UUID().uuidString).JPG")
-                try? FileManager.default.removeItem(at: tempURL)
-                do {
-                    try FileManager.default.copyItem(at: localURL, to: tempURL)
-                } catch {
-                    DispatchQueue.main.async {
+                    if let img = previewImg {
+                        self.stitchedImage = img
                         self.isLoading = false
-                        self.errorMessage = "Error preparando archivo: \(error.localizedDescription)"
-                    }
-                    return
-                }
-
-                // Coser en segundo plano en <0.3s optimizado para pantalla
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let previewImg = PhotoStitcher.shared.stitchForInteractivePreview(from: tempURL)
-                    try? FileManager.default.removeItem(at: tempURL)
-
-                    DispatchQueue.main.async {
-                        if let img = previewImg {
-                            self.stitchedImage = img
-                            self.isLoading = false
-                        } else {
-                            self.isLoading = false
-                            self.errorMessage = "No se pudo generar la vista 360°."
-                        }
+                    } else {
+                        self.isLoading = false
+                        self.errorMessage = "No se pudo generar la vista 360°."
                     }
                 }
-            } else {
-                self.downloadCandidate(urls: remaining)
             }
-        }.resume()
+        }
     }
 }
 

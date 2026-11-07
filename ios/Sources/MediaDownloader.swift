@@ -51,7 +51,8 @@ public class MediaDownloader: ObservableObject {
         let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let nameVariants = filenameVariants(for: item.filename)
 
-        var prefixes = ["", "/DCIM", "/SD0/DCIM", "/tmp/SD0/DCIM"]
+        // Priorizar prefijos conocidos directos
+        var prefixes = ["/DCIM", "", "/SD0/DCIM", "/tmp/SD0/DCIM"]
         if let remembered = rememberedWorkingPrefix {
             prefixes.removeAll(where: { $0 == remembered })
             prefixes.insert(remembered, at: 0)
@@ -67,13 +68,20 @@ public class MediaDownloader: ObservableObject {
             }
         }
 
-        discoverCherokeeExactLink(folder: cleanFolder, filename: item.filename) { [weak self] discoveredURL in
-            guard let self = self else { completion(nil); return }
-            var finalCandidates = candidateURLs
-            if let disc = discoveredURL {
-                finalCandidates.insert(disc, at: 0)
+        // Iniciar descarga inmediata con las URLs directas más probables sin demoras de sondeo
+        self.downloadNextCandidate(candidates: candidateURLs, item: item) { [weak self] resultURL in
+            if let result = resultURL {
+                completion(result)
+            } else {
+                // Fallback: Si los candidatos directos fallaron (404), intentar descubrimiento HTML en Cherokee
+                self?.discoverCherokeeExactLink(folder: cleanFolder, filename: item.filename) { discURL in
+                    guard let discURL = discURL else {
+                        completion(nil)
+                        return
+                    }
+                    self?.downloadNextCandidate(candidates: [discURL], item: item, completion: completion)
+                }
             }
-            self.downloadNextCandidate(candidates: finalCandidates, item: item, completion: completion)
         }
     }
 
