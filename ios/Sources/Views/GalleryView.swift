@@ -1,11 +1,21 @@
 import SwiftUI
 
-public enum TimeGrouping: String, CaseIterable, Identifiable {
-    case days = "Días"
-    case months = "Meses"
-    case all = "Todo"
+public enum GalleryFilterType: Equatable {
+    case last7Days
+    case last30Days
+    case all
+    case custom(start: Date, end: Date)
 
-    public var id: String { rawValue }
+    public static func == (lhs: GalleryFilterType, rhs: GalleryFilterType) -> Bool {
+        switch (lhs, rhs) {
+        case (.last7Days, .last7Days): return true
+        case (.last30Days, .last30Days): return true
+        case (.all, .all): return true
+        case (.custom(let s1, let e1), .custom(let s2, let e2)):
+            return s1 == s2 && e1 == e2
+        default: return false
+        }
+    }
 }
 
 struct GalleryView: View {
@@ -14,16 +24,19 @@ struct GalleryView: View {
     @ObservedObject var downloader = MediaDownloader.shared
 
     @State private var allFiles: [SDFileItem] = []
-    @State private var folders: [String] = []
+    @State private var rawFolders: [String] = []
     @State private var isLoading = false
     @State private var alertMessage = ""
     @State private var showAlert = false
 
-    // Filtros de tiempo y modo de guardado
-    @State private var selectedGrouping: TimeGrouping = .days
+    // Filtros de fecha y guardado
+    @State private var activeFilter: GalleryFilterType = .last7Days
+    @State private var showDatePickerSheet = false
+    @State private var customStartDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+    @State private var customEndDate: Date = Date()
     @AppStorage("defaultStitchMode") private var selectedStitchMode: StitchMode = .stitched360
 
-    // Vista previa 360 interactiva
+    // Vista previa 360 interactiva WebGL
     @State private var previewItem: SDFileItem? = nil
 
     // Modo Selección Múltiple
@@ -34,6 +47,11 @@ struct GalleryView: View {
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0)
     private let darkBg = Color(red: 0.05, green: 0.06, blue: 0.09)
     private let cardBg = Color(red: 0.10, green: 0.12, blue: 0.18)
+
+    private var isCustomActive: Bool {
+        if case .custom = activeFilter { return true }
+        return false
+    }
 
     var body: some View {
         NavigationView {
@@ -47,7 +65,7 @@ struct GalleryView: View {
                         .padding(.top, 6)
                         .padding(.bottom, 6)
 
-                    // 2. Selector de Agrupación Temporal y Modo de Guardado
+                    // 2. Barra de Filtros de Fecha (7 Días, 30 Días, Todo, Filtrar) + Modo
                     filterAndModeBar
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
@@ -59,26 +77,14 @@ struct GalleryView: View {
                             ProgressView()
                                 .progressViewStyle(CircularProgressViewStyle(tint: brandOrange))
                                 .scaleEffect(1.4)
-                            Text("Leyendo carrete de la microSD...")
+                            Text("Consultando fotos de la cámara...")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
                     } else if allFiles.isEmpty {
                         Spacer()
-                        VStack(spacing: 16) {
-                            Image(systemName: "photo.on.rectangle.angled")
-                                .font(.system(size: 52))
-                                .foregroundColor(.secondary.opacity(0.6))
-                            Text("No se encontraron fotos o videos.")
-                                .font(.callout)
-                                .foregroundColor(.secondary)
-                            Button("Volver a Explorar") {
-                                refreshAll()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(brandOrange)
-                        }
+                        emptyStateView
                         Spacer()
                     } else {
                         mainTimelineGrid
@@ -129,7 +135,10 @@ struct GalleryView: View {
                 }
             }
             .onAppear {
-                refreshAll()
+                initialLoad()
+            }
+            .sheet(isPresented: $showDatePickerSheet) {
+                datePickerSheetView
             }
             .fullScreenCover(item: $previewItem) { item in
                 PhotoPreviewView(
@@ -182,47 +191,82 @@ struct GalleryView: View {
         .cornerRadius(10)
     }
 
-    // MARK: - Barra de Agrupación Temporal y Modo
+    // MARK: - Barra de Filtros de Fecha y Modo de Guardado
 
     private var filterAndModeBar: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                // Selector Temporal (Días / Meses / Todo)
-                Picker("Agrupación", selection: $selectedGrouping) {
-                    ForEach(TimeGrouping.allCases) { g in
-                        Text(g.rawValue).tag(g)
-                    }
-                }
-                .pickerStyle(.segmented)
+        HStack(spacing: 6) {
+            // Píldoras de Fecha: 7 Días, 30 Días, Todo, Filtrar
+            filterPill(title: "7 Días", isSelected: activeFilter == .last7Days) {
+                activeFilter = .last7Days
+                applyActiveFilter()
+            }
 
-                // Menú de Selección de Modo de Guardado
-                Menu {
-                    ForEach(StitchMode.allCases) { mode in
-                        Button {
-                            selectedStitchMode = mode
-                        } label: {
-                            HStack {
-                                Text(mode.title)
-                                if selectedStitchMode == mode {
-                                    Image(systemName: "checkmark")
-                                }
+            filterPill(title: "30 Días", isSelected: activeFilter == .last30Days) {
+                activeFilter = .last30Days
+                applyActiveFilter()
+            }
+
+            filterPill(title: "Todo", isSelected: activeFilter == .all) {
+                activeFilter = .all
+                applyActiveFilter()
+            }
+
+            filterPill(
+                title: isCustomActive ? "Rango" : "Filtrar",
+                icon: "calendar",
+                isSelected: isCustomActive
+            ) {
+                showDatePickerSheet = true
+            }
+
+            Spacer()
+
+            // Menú de Selección de Modo de Guardado
+            Menu {
+                ForEach(StitchMode.allCases) { mode in
+                    Button {
+                        selectedStitchMode = mode
+                    } label: {
+                        HStack {
+                            Text(mode.title)
+                            if selectedStitchMode == mode {
+                                Image(systemName: "checkmark")
                             }
                         }
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "gearshape")
-                        Text(selectedStitchMode == .stitched360 ? "360°" : (selectedStitchMode == .both ? "Ambas" : "Original"))
-                            .font(.system(size: 11, weight: .bold))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.white.opacity(0.10))
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
                 }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "gearshape")
+                    Text(selectedStitchMode == .stitched360 ? "360°" : (selectedStitchMode == .both ? "Ambas" : "Orig"))
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(Color.white.opacity(0.10))
+                .foregroundColor(.white)
+                .cornerRadius(8)
             }
         }
+    }
+
+    private func filterPill(title: String, icon: String? = nil, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let ic = icon {
+                    Image(systemName: ic)
+                        .font(.system(size: 10.5, weight: .semibold))
+                }
+                Text(title)
+                    .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isSelected ? brandOrange : Color.white.opacity(0.09))
+            .foregroundColor(isSelected ? .white : .white.opacity(0.85))
+            .cornerRadius(16)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Timeline Grid Estilo Insta360
@@ -232,7 +276,6 @@ struct GalleryView: View {
             LazyVStack(alignment: .leading, spacing: 18) {
                 ForEach(groupedSections, id: \.title) { section in
                     VStack(alignment: .leading, spacing: 8) {
-                        // Encabezado de Sección (Estilo Apple Fotos / Insta360)
                         HStack {
                             Text(section.title)
                                 .font(.system(size: 14, weight: .bold))
@@ -244,7 +287,6 @@ struct GalleryView: View {
                         }
                         .padding(.horizontal, 16)
 
-                        // Cuadrícula de 2 Columnas
                         LazyVGrid(columns: [
                             GridItem(.flexible(), spacing: 10),
                             GridItem(.flexible(), spacing: 10)
@@ -280,20 +322,17 @@ struct GalleryView: View {
             }
         } label: {
             ZStack(alignment: .bottomLeading) {
-                // Miniatura real asíncrona
                 SDThumbnailView(item: item)
                     .aspectRatio(16/9, contentMode: .fill)
                     .frame(minWidth: 0, maxWidth: .infinity)
                     .clipped()
 
-                // Gradiente inferior para legibilidad
                 LinearGradient(
                     colors: [.clear, .black.opacity(0.75)],
                     startPoint: .center,
                     endPoint: .bottom
                 )
 
-                // Overlays sutiles (Badge 360 o Video en esquina inferior izquierda)
                 HStack(spacing: 4) {
                     if item.isVideo {
                         Image(systemName: "video.fill")
@@ -311,7 +350,6 @@ struct GalleryView: View {
                 .cornerRadius(5)
                 .padding(6)
 
-                // Botón flotante en esquina superior derecha
                 VStack {
                     HStack {
                         Spacer()
@@ -321,7 +359,6 @@ struct GalleryView: View {
                                 .foregroundColor(isSelected ? brandOrange : .white.opacity(0.8))
                                 .padding(6)
                         } else {
-                            // Botón de Descarga Rápida
                             Button {
                                 downloader.saveMediaToCameraRoll(item: item, mode: selectedStitchMode) { ok, msg in
                                     alertMessage = msg
@@ -348,6 +385,77 @@ struct GalleryView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Estado Vacío
+
+    private var emptyStateView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "photo.on.rectangle.angled")
+                .font(.system(size: 50))
+                .foregroundColor(.secondary.opacity(0.6))
+
+            let msg: String = {
+                switch activeFilter {
+                case .last7Days: return "No hay fotos en los últimos 7 días."
+                case .last30Days: return "No hay fotos en los últimos 30 días."
+                case .all: return "No se encontraron fotos en la microSD."
+                case .custom: return "No hay fotos en el rango seleccionado."
+                }
+            }()
+
+            Text(msg)
+                .font(.callout)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+
+            if activeFilter != .all {
+                Button("Ver Todas las Fotos") {
+                    activeFilter = .all
+                    applyActiveFilter()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(brandOrange)
+            }
+        }
+    }
+
+    // MARK: - Hoja de Selección de Fechas Personalizadas
+
+    private var datePickerSheetView: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Selecciona Rango de Búsqueda")) {
+                    DatePicker("Desde", selection: $customStartDate, in: ...Date(), displayedComponents: .date)
+                    DatePicker("Hasta", selection: $customEndDate, in: customStartDate...Date(), displayedComponents: .date)
+                }
+
+                Section {
+                    Button {
+                        activeFilter = .custom(start: customStartDate, end: customEndDate)
+                        showDatePickerSheet = false
+                        applyActiveFilter()
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Text("Aplicar Filtro")
+                                .font(.body.weight(.bold))
+                                .foregroundColor(brandOrange)
+                            Spacer()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Filtrar por Fecha")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { showDatePickerSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 
     // MARK: - Barra de Acciones de Selección Múltiple
@@ -389,7 +497,7 @@ struct GalleryView: View {
         .background(cardBg)
     }
 
-    // MARK: - Lógica de Agrupación Temporal
+    // MARK: - Agrupación por Días
 
     private struct GroupedSection {
         let title: String
@@ -397,38 +505,18 @@ struct GalleryView: View {
     }
 
     private var groupedSections: [GroupedSection] {
-        switch selectedGrouping {
-        case .all:
-            return [GroupedSection(title: "Todas las fotos y videos (\(allFiles.count))", items: allFiles)]
+        var dict: [String: [SDFileItem]] = [:]
+        var order: [String] = []
 
-        case .days:
-            var dict: [String: [SDFileItem]] = [:]
-            var order: [String] = []
-
-            for item in allFiles {
-                let dayKey = formatHumanDay(from: item.filename)
-                if dict[dayKey] == nil {
-                    dict[dayKey] = []
-                    order.append(dayKey)
-                }
-                dict[dayKey]?.append(item)
+        for item in allFiles {
+            let dayKey = formatHumanDay(from: item.filename)
+            if dict[dayKey] == nil {
+                dict[dayKey] = []
+                order.append(dayKey)
             }
-            return order.map { GroupedSection(title: $0, items: dict[$0] ?? []) }
-
-        case .months:
-            var dict: [String: [SDFileItem]] = [:]
-            var order: [String] = []
-
-            for item in allFiles {
-                let monthKey = formatHumanMonth(from: item.filename)
-                if dict[monthKey] == nil {
-                    dict[monthKey] = []
-                    order.append(monthKey)
-                }
-                dict[monthKey]?.append(item)
-            }
-            return order.map { GroupedSection(title: $0, items: dict[$0] ?? []) }
+            dict[dayKey]?.append(item)
         }
+        return order.map { GroupedSection(title: $0, items: dict[$0] ?? []) }
     }
 
     private func formatHumanDay(from filename: String) -> String {
@@ -441,11 +529,6 @@ struct GalleryView: View {
         } else {
             return formatDate(d, format: "d 'de' MMMM, yyyy")
         }
-    }
-
-    private func formatHumanMonth(from filename: String) -> String {
-        guard let d = parseDate(from: filename) else { return "Otras Fotos" }
-        return formatDate(d, format: "MMMM yyyy").capitalized
     }
 
     private func formatDate(_ date: Date, format: String) -> String {
@@ -467,30 +550,80 @@ struct GalleryView: View {
         return f.date(from: dateStr)
     }
 
-    // MARK: - Operaciones
+    private func parseFolderDate(_ folderName: String) -> Date? {
+        let digits = folderName.trimmingCharacters(in: CharacterSet.decimalDigits.inverted)
+        guard digits.count >= 8 else { return nil }
+        let prefix = String(digits.prefix(8))
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd"
+        return f.date(from: prefix)
+    }
 
-    private func refreshAll() {
+    // MARK: - Lógica de Filtrado Inteligente de Carpetas
+
+    private func getFilteredFolders() -> [String] {
+        let cal = Calendar.current
+        let today = Date()
+
+        switch activeFilter {
+        case .last7Days:
+            let cutoff = cal.date(byAdding: .day, value: -7, to: today) ?? Date.distantPast
+            let matches = rawFolders.filter { f in
+                guard let d = parseFolderDate(f) else { return false }
+                return d >= cutoff
+            }
+            // Si la cámara no tiene fotos en los últimos 7 días, mostrar al menos la carpeta más reciente
+            return matches.isEmpty ? Array(rawFolders.prefix(1)) : matches
+
+        case .last30Days:
+            let cutoff = cal.date(byAdding: .day, value: -30, to: today) ?? Date.distantPast
+            let matches = rawFolders.filter { f in
+                guard let d = parseFolderDate(f) else { return false }
+                return d >= cutoff
+            }
+            return matches.isEmpty ? Array(rawFolders.prefix(2)) : matches
+
+        case .all:
+            return rawFolders
+
+        case .custom(let start, let end):
+            let startDay = cal.startOfDay(for: start)
+            let endDay = cal.date(bySettingHour: 23, minute: 59, second: 59, of: end) ?? end
+            return rawFolders.filter { f in
+                guard let d = parseFolderDate(f) else { return false }
+                return d >= startDay && d <= endDay
+            }
+        }
+    }
+
+    private func initialLoad() {
         isLoading = true
         camera.fetchStorageStatus()
         camera.listDCIMFolders { list in
-            let sortedFolders = list.sorted(by: >)
-            self.folders = sortedFolders
+            self.rawFolders = list.sorted(by: >)
+            self.applyActiveFilter()
+        }
+    }
 
-            guard let firstFolder = sortedFolders.first else {
-                self.isLoading = false
-                self.allFiles = []
-                return
-            }
+    private func applyActiveFilter() {
+        let targets = getFilteredFolders()
+        guard let first = targets.first else {
+            self.allFiles = []
+            self.isLoading = false
+            return
+        }
 
-            // 1. Cargar la carpeta más reciente INMEDIATAMENTE para mostrar fotos en <0.5s
-            self.camera.listFilesInFolder(firstFolder) { recentItems in
-                self.allFiles = recentItems
-                self.isLoading = false // ¡Apagar el spinner inmediatamente!
+        self.isLoading = true
+        self.allFiles = []
 
-                // 2. Cargar las demás carpetas de forma secuencial en segundo plano sin colisión TCP
-                let remainingFolders = Array(sortedFolders.dropFirst())
-                self.loadRemainingFoldersSequentially(remaining: remainingFolders)
-            }
+        // Cargar inmediatamente la primera carpeta para renderizar en <0.3s
+        camera.listFilesInFolder(first) { recentItems in
+            self.allFiles = recentItems
+            self.isLoading = false
+
+            // Cargar secuencialmente solo las demás carpetas incluidas en el filtro activo
+            let remaining = Array(targets.dropFirst())
+            self.loadRemainingFoldersSequentially(remaining: remaining)
         }
     }
 
@@ -504,7 +637,6 @@ struct GalleryView: View {
                 }
                 self.allFiles = current.sorted(by: { $0.filename > $1.filename })
             }
-            // Siguiente carpeta
             self.loadRemainingFoldersSequentially(remaining: Array(remaining.dropFirst()))
         }
     }

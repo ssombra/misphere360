@@ -22,9 +22,9 @@ public struct PhotoPreviewView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // 1. Visor 360° o Indicador de Carga
+            // 1. Visor WebGL 360° idéntico a la app de Mac
             if let img = stitchedImage {
-                Sphere360View(image: img, enableMotion: enableGyro)
+                Web360Viewer(image: img, enableMotion: enableGyro)
                     .ignoresSafeArea()
             } else if let err = errorMessage {
                 VStack(spacing: 16) {

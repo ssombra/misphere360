@@ -3,32 +3,83 @@ import UIKit
 import SwiftUI
 import ImageIO
 
-/// Administra la descarga asíncrona y caché de miniaturas de la tarjeta microSD de la cámara
+/// Administra la descarga asíncrona, decodificación eficiente y caché en disco/RAM de miniaturas de la microSD
 public class ThumbnailCache: ObservableObject {
     public static let shared = ThumbnailCache()
 
-    private let cache = NSCache<NSString, UIImage>()
-    private var inFlightTasks: [String: URLSessionDataTask] = [:]
-    private let queue = DispatchQueue(label: "com.misphere360.thumbcache", qos: .userInitiated)
+    private let memoryCache = NSCache<NSString, UIImage>()
+    private let downloadQueue = OperationQueue()
+    private var inFlightKeys: Set<String> = []
+    private let syncQueue = DispatchQueue(label: "com.misphere360.thumbcache.sync")
+    private let diskCacheURL: URL
+
+    /// Prefijo HTTP que ya funcionó para evitar pruebas redundantes
+    private var rememberedPrefix: String? = "/DCIM"
 
     public init() {
-        cache.countLimit = 200 // Máximo 200 miniaturas en RAM
+        memoryCache.countLimit = 150
+        downloadQueue.maxConcurrentOperationCount = 2
+        downloadQueue.qualityOfService = .userInitiated
+
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        diskCacheURL = caches.appendingPathComponent("Thumbnails", isDirectory: true)
+        try? FileManager.default.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
     }
 
+    private func cacheKey(for item: SDFileItem) -> String {
+        return "\(item.folder)_\(item.filename)"
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+    }
+
+    private func diskFileURL(for key: String) -> URL {
+        return diskCacheURL.appendingPathComponent("\(key).jpg")
+    }
+
+    /// Obtiene miniatura de memoria o disco síncronamente si ya existe
     public func getThumbnail(for item: SDFileItem) -> UIImage? {
-        let key = "\(item.folder)/\(item.filename)" as NSString
-        return cache.object(forKey: key)
+        let key = cacheKey(for: item)
+
+        // 1. Memoria RAM
+        if let memImg = memoryCache.object(forKey: key as NSString) {
+            return memImg
+        }
+
+        // 2. Caché en Disco
+        let fileURL = diskFileURL(for: key)
+        if let data = try? Data(contentsOf: fileURL), let diskImg = UIImage(data: data) {
+            memoryCache.setObject(diskImg, forKey: key as NSString)
+            return diskImg
+        }
+
+        return nil
     }
 
+    /// Carga la miniatura de forma asíncrona sin bloquear la UI ni saturar el servidor Cherokee de la cámara
     public func loadThumbnail(for item: SDFileItem, completion: @escaping (UIImage?) -> Void) {
-        let key = "\(item.folder)/\(item.filename)" as NSString
+        let key = cacheKey(for: item)
 
-        if let cached = cache.object(forKey: key) {
-            completion(cached)
+        if let existing = getThumbnail(for: item) {
+            completion(existing)
             return
         }
 
-        // Descargar primeros 90 KB o imagen para decodificar miniatura rápida
+        syncQueue.async {
+            if self.inFlightKeys.contains(key) {
+                return
+            }
+            self.inFlightKeys.insert(key)
+
+            // Para archivos de video, intentar buscar el archivo .THM de Ambarella
+            if item.isVideo {
+                self.queueVideoThumbnailFetch(item: item, key: key, completion: completion)
+            } else {
+                self.queuePhotoThumbnailFetch(item: item, key: key, completion: completion)
+            }
+        }
+    }
+
+    private func queuePhotoThumbnailFetch(item: SDFileItem, key: String, completion: @escaping (UIImage?) -> Void) {
         let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let rawName = item.filename
         var candidates: [String] = []
@@ -37,105 +88,158 @@ public class ThumbnailCache: ObservableObject {
             let stem = rawName.dropLast(4)
             candidates.append("\(stem)AA.JPG")
             candidates.append(rawName)
+            candidates.append("\(stem)aa.jpg")
+            candidates.append(rawName.lowercased())
         } else {
             candidates.append(rawName)
         }
 
-        let prefixes = ["", "/DCIM", "/SD0/DCIM", "/tmp/SD0/DCIM"]
+        var prefixes = ["/DCIM", "", "/SD0/DCIM", "/tmp/SD0/DCIM"]
+        if let pref = rememberedPrefix {
+            prefixes.removeAll(where: { $0 == pref })
+            prefixes.insert(pref, at: 0)
+        }
+
         var candidateURLs: [URL] = []
         for p in prefixes {
             for c in candidates {
                 if let u = URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)\(p)/\(cleanFolder)/\(c)") {
+                    if !candidateURLs.contains(u) {
+                        candidateURLs.append(u)
+                    }
+                }
+            }
+        }
+
+        downloadQueue.addOperation { [weak self] in
+            guard let self = self else { return }
+            self.downloadAndProcessThumbnail(urls: candidateURLs, key: key) { [weak self] image in
+                self?.syncQueue.async {
+                    self?.inFlightKeys.remove(key)
+                }
+                DispatchQueue.main.async {
+                    completion(image)
+                }
+            }
+        }
+    }
+
+    private func queueVideoThumbnailFetch(item: SDFileItem, key: String, completion: @escaping (UIImage?) -> Void) {
+        // En cámaras Ambarella, la miniatura de un video VID_xxx.MP4 suele llamarse VID_xxx.THM
+        let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let rawName = item.filename
+        var thmNames: [String] = []
+        if rawName.uppercased().hasSuffix(".MP4") {
+            let stem = rawName.dropLast(4)
+            thmNames.append("\(stem)AA.THM")
+            thmNames.append("\(stem).THM")
+            thmNames.append("\(stem)aa.thm")
+            thmNames.append("\(stem).thm")
+        }
+
+        var prefixes = ["/DCIM", "", "/SD0/DCIM"]
+        var candidateURLs: [URL] = []
+        for p in prefixes {
+            for t in thmNames {
+                if let u = URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)\(p)/\(cleanFolder)/\(t)") {
                     candidateURLs.append(u)
                 }
             }
         }
 
-        tryFetchThumbnail(urls: candidateURLs, key: key, completion: completion)
+        downloadQueue.addOperation { [weak self] in
+            guard let self = self else { return }
+            self.downloadAndProcessThumbnail(urls: candidateURLs, key: key) { [weak self] image in
+                self?.syncQueue.async {
+                    self?.inFlightKeys.remove(key)
+                }
+                DispatchQueue.main.async {
+                    completion(image)
+                }
+            }
+        }
     }
 
-    private func tryFetchThumbnail(urls: [URL], key: NSString, completion: @escaping (UIImage?) -> Void) {
+    private func downloadAndProcessThumbnail(urls: [URL], key: String, completion: @escaping (UIImage?) -> Void) {
         guard let url = urls.first else {
-            DispatchQueue.main.async { completion(nil) }
+            completion(nil)
             return
         }
 
         let remaining = Array(urls.dropFirst())
 
         var req = URLRequest(url: url)
-        req.timeoutInterval = 4.0
-        // Solicitar primeros 32 KB donde viene incrustada la miniatura EXIF de 5 KB
-        req.setValue("bytes=0-32768", forHTTPHeaderField: "Range")
+        req.timeoutInterval = 8.0
 
-        let task = URLSession.shared.dataTask(with: req) { [weak self] data, response, _ in
+        let sema = DispatchSemaphore(value: 0)
+        var resultImage: UIImage? = nil
+        var didSucceed = false
+
+        let task = URLSession.shared.downloadTask(with: req) { [weak self] localURL, resp, _ in
+            defer { sema.signal() }
             guard let self = self else { return }
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
 
-            // 200 (Completo) o 206 (Partial Content por Range)
-            if (statusCode == 200 || statusCode == 206), let data = data, !data.isEmpty {
-                if let thumb = self.extractThumbnail(data: data) {
-                    self.cache.setObject(thumb, forKey: key)
-                    DispatchQueue.main.async { completion(thumb) }
-                    return
-                }
-            }
+            if code == 200, let localURL = localURL {
+                if let thumb = self.generateOptimizedThumbnail(from: localURL) {
+                    resultImage = thumb
+                    didSucceed = true
+                    self.saveThumbnailToCaches(thumb, key: key)
 
-            // Probar siguiente URL candidata
-            self.tryFetchThumbnail(urls: remaining, key: key, completion: completion)
-        }
-        task.resume()
-    }
-
-    private func extractThumbnail(data: Data) -> UIImage? {
-        // En los archivos JPG de Xiaomi Mi Sphere, a partir del byte ~1536 se encuentra incrustada
-        // la miniatura EXIF completa de 5 KB delimitada por 0xFFD8 y 0xFFD9
-        if data.count > 10, data[0] == 0xFF, data[1] == 0xD8 {
-            let limit = min(data.count - 1, 65536)
-            var secondSOI: Int? = nil
-            for i in 2..<limit {
-                if data[i] == 0xFF && data[i + 1] == 0xD8 {
-                    secondSOI = i
-                    break
-                }
-            }
-            if let start = secondSOI {
-                for i in (start + 2)..<limit {
-                    if data[i] == 0xFF && data[i + 1] == 0xD9 {
-                        let thumbSlice = data.subdata(in: start..<(i + 2))
-                        if let img = UIImage(data: thumbSlice) {
-                            return img
-                        }
-                        break
+                    // Recordar prefijo exitoso
+                    let path = url.path
+                    if path.contains("/DCIM/") {
+                        self.rememberedPrefix = "/DCIM"
+                    } else if path.contains("/SD0/DCIM/") {
+                        self.rememberedPrefix = "/SD0/DCIM"
+                    } else {
+                        self.rememberedPrefix = ""
                     }
                 }
             }
         }
-        return downsampleImage(data: data, maxPixelSize: 360)
+        task.resume()
+        sema.wait()
+
+        if didSucceed, let img = resultImage {
+            completion(img)
+        } else {
+            // Probar siguiente URL candidata
+            downloadAndProcessThumbnail(urls: remaining, key: key, completion: completion)
+        }
     }
 
-    private func downsampleImage(data: Data, maxPixelSize: CGFloat) -> UIImage? {
+    private func generateOptimizedThumbnail(from fileURL: URL) -> UIImage? {
         let imageSourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
-        guard let imageSource = CGImageSourceCreateWithData(data as CFData, imageSourceOptions) else {
-            // Si la lectura parcial de bytes no cerró el JPEG, probar UIImage directo
-            return UIImage(data: data)
+        guard let imageSource = CGImageSourceCreateWithURL(fileURL as CFURL, imageSourceOptions) else {
+            return nil
         }
 
         let downsampledOptions: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceShouldCacheImmediately: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+            kCGImageSourceThumbnailMaxPixelSize: 360
         ]
 
-        guard let downsampledImage = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, downsampledOptions as CFDictionary) else {
-            return UIImage(data: data)
+        guard let cgThumb = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, downsampledOptions as CFDictionary) else {
+            return nil
         }
 
-        return UIImage(cgImage: downsampledImage)
+        return UIImage(cgImage: cgThumb)
+    }
+
+    private func saveThumbnailToCaches(_ image: UIImage, key: String) {
+        memoryCache.setObject(image, forKey: key as NSString)
+
+        let targetDiskURL = diskFileURL(for: key)
+        if let jpeg = image.jpegData(compressionQuality: 0.82) {
+            try? jpeg.write(to: targetDiskURL, options: .atomic)
+        }
     }
 }
 
-/// Vista de miniatura asíncrona estilo Insta360
+/// Vista de miniatura asíncrona estilo Insta360 con carga progresiva fluida
 public struct SDThumbnailView: View {
     let item: SDFileItem
     @State private var thumbnail: UIImage? = nil
@@ -147,18 +251,18 @@ public struct SDThumbnailView: View {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+                    .transition(.opacity.animation(.easeInOut(duration: 0.2)))
             } else {
                 ZStack {
-                    Color(red: 0.12, green: 0.14, blue: 0.20)
+                    Color(red: 0.10, green: 0.12, blue: 0.17)
                     if isLoading {
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.6)))
-                            .scaleEffect(0.8)
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white.opacity(0.5)))
+                            .scaleEffect(0.75)
                     } else {
                         Image(systemName: item.isVideo ? "video.fill" : "camera.metering.matrix")
-                            .foregroundColor(.white.opacity(0.3))
-                            .font(.system(size: 24))
+                            .foregroundColor(.white.opacity(0.25))
+                            .font(.system(size: 26))
                     }
                 }
             }
