@@ -13,16 +13,27 @@ public struct PhotoPreviewView: View {
     @State private var loadingMessage = "Cargando foto desde la cámara..."
     @State private var enableGyro = false
     @State private var showDeleteConfirm = false
-    @State private var selectedSaveMode: StitchMode = .stitched360
+    @State private var showInfoSheet = false
+    @State private var downloadedFileSize: Int64? = nil
     @State private var errorMessage: String? = nil
 
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0)
+
+    private var formattedFileSize: String {
+        if let size = downloadedFileSize, size > 0 {
+            let bcf = ByteCountFormatter()
+            bcf.allowedUnits = [.useMB, .useKB]
+            bcf.countStyle = .file
+            return bcf.string(fromByteCount: size)
+        }
+        return "~6.8 MB"
+    }
 
     public var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // 1. Visor WebGL 360° idéntico a la app de Mac
+            // 1. Visor WebGL 360° interactivo
             if let img = stitchedImage {
                 Web360Viewer(image: img, enableMotion: enableGyro)
                     .ignoresSafeArea()
@@ -51,51 +62,46 @@ public struct PhotoPreviewView: View {
                 }
             }
 
-            // 2. Barra Superior Flotante
+            // 2. Controles Superiores Flotantes (Minimalistas, solo íconos)
             VStack {
-                HStack(spacing: 12) {
+                HStack {
+                    // Botón Cerrar (Izquierda)
                     Button {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .bold))
+                            .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.white)
-                            .frame(width: 36, height: 36)
-                            .background(Color.black.opacity(0.6))
+                            .frame(width: 42, height: 42)
+                            .background(.ultraThinMaterial)
+                            .background(Color.black.opacity(0.45))
                             .clipShape(Circle())
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.filename)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        Text(item.date)
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.7))
+                            .overlay(
+                                Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                            )
+                            .shadow(color: Color.black.opacity(0.35), radius: 6, x: 0, y: 3)
                     }
 
                     Spacer()
 
-                    // Botón de alternar Giroscopio
+                    // Botón Giroscopio / Táctil (Derecha, solo ícono redondo)
                     if stitchedImage != nil {
                         Button {
                             let impact = UIImpactFeedbackGenerator(style: .light)
                             impact.impactOccurred()
                             enableGyro.toggle()
                         } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: enableGyro ? "gyroscope" : "hand.draw")
-                                Text(enableGyro ? "Giroscopio" : "Táctil")
-                                    .font(.caption2)
-                                    .fontWeight(.bold)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(enableGyro ? brandOrange : Color.black.opacity(0.6))
-                            .foregroundColor(.white)
-                            .cornerRadius(20)
+                            Image(systemName: enableGyro ? "gyroscope" : "hand.draw")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 42, height: 42)
+                                .background(enableGyro ? brandOrange : Color.black.opacity(0.45))
+                                .background(enableGyro ? AnyShapeStyle(brandOrange) : AnyShapeStyle(.ultraThinMaterial))
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle().stroke(Color.white.opacity(0.2), lineWidth: 0.5)
+                                )
+                                .shadow(color: enableGyro ? brandOrange.opacity(0.4) : Color.black.opacity(0.35), radius: 6, x: 0, y: 3)
                         }
                     }
                 }
@@ -104,85 +110,79 @@ public struct PhotoPreviewView: View {
 
                 Spacer()
 
-                // 3. Barra Inferior Flotante (Acciones y Metadatos)
+                // 3. Botones Flotantes Inferiores (Estilo iOS redondo, ultra-limpio y no invasivo)
                 if stitchedImage != nil {
-                    VStack(spacing: 10) {
-                        // Fila de metadatos sutiles
-                        HStack(spacing: 8) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "globe")
-                                Text("Panorama 360° · 6912×3456")
-                            }
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.85))
-
-                            Spacer()
-
-                            if LocationManager.shared.getBestLocation(for: item.filename) != nil {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "location.fill")
-                                    Text("GPS Vinculado")
-                                }
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(Color(red: 0.2, green: 0.85, blue: 0.45))
-                            }
+                    HStack(spacing: 28) {
+                        // 1. Borrar con confirmación
+                        Button {
+                            showDeleteConfirm = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundColor(.red.opacity(0.95))
+                                .frame(width: 50, height: 50)
+                                .background(.ultraThinMaterial)
+                                .background(Color.black.opacity(0.45))
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                                )
+                                .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
                         }
 
-                        // Botones de Acción
-                        HStack(spacing: 10) {
-                            // Botón Borrar
-                            Button {
-                                showDeleteConfirm = true
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.red.opacity(0.9))
-                                    .frame(width: 44, height: 44)
-                                    .background(Color.white.opacity(0.12))
-                                    .cornerRadius(12)
-                            }
-
-                            // Botón Guardar en Carrete con Menú de opciones
-                            Menu {
-                                Button {
-                                    onDownloadRequested?(.stitched360)
-                                    dismiss()
-                                } label: {
-                                    Label("🌐 Solo 360° (Recomendado)", systemImage: "globe")
-                                }
-                                Button {
-                                    onDownloadRequested?(.both)
-                                    dismiss()
-                                } label: {
-                                    Label("📦 Ambas (Original + 360°)", systemImage: "square.stack.3d.down.right")
-                                }
-                                Button {
-                                    onDownloadRequested?(.original)
-                                    dismiss()
-                                } label: {
-                                    Label("🔘 Solo Original (microSD)", systemImage: "doc")
-                                }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "square.and.arrow.down.fill")
-                                    Text("Guardar en Fotos")
-                                    Image(systemName: "chevron.up.chevron.down")
-                                        .font(.caption2)
-                                }
-                                .font(.system(size: 14, weight: .bold))
+                        // 2. Información de la foto ("i")
+                        Button {
+                            let impact = UIImpactFeedbackGenerator(style: .light)
+                            impact.impactOccurred()
+                            showInfoSheet = true
+                        } label: {
+                            Image(systemName: "info")
+                                .font(.system(size: 20, weight: .semibold))
                                 .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                                .background(brandOrange)
-                                .cornerRadius(12)
+                                .frame(width: 50, height: 50)
+                                .background(.ultraThinMaterial)
+                                .background(Color.black.opacity(0.45))
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                                )
+                                .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
+                        }
+
+                        // 3. Descarga / Guardar en Fotos
+                        Menu {
+                            Button {
+                                onDownloadRequested?(.stitched360)
+                                dismiss()
+                            } label: {
+                                Label("Solo 360° (Recomendado)", systemImage: "globe")
                             }
+                            Button {
+                                onDownloadRequested?(.both)
+                                dismiss()
+                            } label: {
+                                Label("Ambas (Original + 360°)", systemImage: "square.stack.3d.down.right")
+                            }
+                            Button {
+                                onDownloadRequested?(.original)
+                                dismiss()
+                            } label: {
+                                Label("Solo Original (microSD)", systemImage: "doc")
+                            }
+                        } label: {
+                            Image(systemName: "square.and.arrow.down")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 50, height: 50)
+                                .background(brandOrange)
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle().stroke(Color.white.opacity(0.25), lineWidth: 0.5)
+                                )
+                                .shadow(color: brandOrange.opacity(0.4), radius: 8, x: 0, y: 4)
                         }
                     }
-                    .padding(14)
-                    .background(Color.black.opacity(0.75))
-                    .cornerRadius(18)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 32)
                 }
             }
         }
@@ -197,6 +197,9 @@ public struct PhotoPreviewView: View {
             }
         } message: {
             Text("Esta acción borrará permanentemente \(item.filename) de la tarjeta de memoria.")
+        }
+        .sheet(isPresented: $showInfoSheet) {
+            PhotoInfoSheetView(item: item, fileSizeFormatted: formattedFileSize)
         }
     }
 
@@ -240,6 +243,13 @@ public struct PhotoPreviewView: View {
         URLSession.shared.downloadTask(with: req) { localURL, resp, _ in
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if status == 200, let localURL = localURL {
+                if let attr = try? FileManager.default.attributesOfItem(atPath: localURL.path),
+                   let size = attr[.size] as? Int64 {
+                    DispatchQueue.main.async {
+                        self.downloadedFileSize = size
+                    }
+                }
+
                 DispatchQueue.main.async {
                     self.loadingMessage = "Cosiendo esfera 360°..."
                 }
@@ -276,5 +286,72 @@ public struct PhotoPreviewView: View {
                 self.downloadCandidate(urls: remaining)
             }
         }.resume()
+    }
+}
+
+/// Hoja modal de detalles de la foto (metadatos, dimensiones, GPS)
+struct PhotoInfoSheetView: View {
+    let item: SDFileItem
+    let fileSizeFormatted: String
+    @Environment(\.dismiss) var dismiss
+
+    var bestLocation: CLLocation? {
+        LocationManager.shared.getBestLocation(for: item.filename)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Archivo y Almacenamiento") {
+                    infoRow(icon: "doc", label: "Nombre", value: item.filename)
+                    infoRow(icon: "folder", label: "Carpeta", value: "DCIM/\(item.folder)")
+                    infoRow(icon: "calendar", label: "Fecha", value: item.date)
+                    infoRow(icon: "internaldrive", label: "Tamaño en tarjeta", value: fileSizeFormatted)
+                }
+
+                Section("Imagen y Resolución") {
+                    infoRow(icon: "globe", label: "Formato", value: "Panorama Equirrectangular 360°")
+                    infoRow(icon: "aspectratio", label: "Proporción", value: "2:1 (360° × 180°)")
+                    infoRow(icon: "camera", label: "Resolución", value: "6912 × 3456 px (24 MP)")
+                    infoRow(icon: "tag", label: "Metadatos", value: "Google Photo Sphere (GPano)")
+                }
+
+                Section("Geolocalización GPS") {
+                    if let loc = bestLocation {
+                        infoRow(icon: "checkmark.circle.fill", label: "Estado", value: "GPS Vinculado con iPhone", valueColor: .green)
+                        infoRow(icon: "location.north.line", label: "Coordenadas", value: String(format: "%.5f, %.5f", loc.coordinate.latitude, loc.coordinate.longitude))
+                        infoRow(icon: "mountain.2", label: "Altitud", value: String(format: "%.1f m", loc.altitude))
+                        infoRow(icon: "scope", label: "Precisión", value: String(format: "±%.1f m", loc.horizontalAccuracy))
+                    } else {
+                        infoRow(icon: "location.slash", label: "Estado", value: "Sin datos GPS vinculados", valueColor: .secondary)
+                        Text("Para registrar la ubicación en cada foto, asegúrate de mantener la app abierta durante las tomas.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Detalles de la Foto")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Listo") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func infoRow(icon: String, label: String, value: String, valueColor: Color = .primary) -> some View {
+        HStack {
+            Label(label, systemImage: icon)
+                .font(.subheadline)
+            Spacer()
+            Text(value)
+                .font(.subheadline)
+                .foregroundColor(valueColor)
+                .multilineTextAlignment(.trailing)
+        }
     }
 }
