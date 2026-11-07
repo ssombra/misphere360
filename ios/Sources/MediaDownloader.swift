@@ -46,6 +46,80 @@ public class MediaDownloader: ObservableObject {
         }
     }
 
+    /// Descarga directamente el archivo original de la cámara a un archivo temporal local
+    public func downloadToTemporaryFile(item: SDFileItem, completion: @escaping (URL?) -> Void) {
+        let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let nameVariants = filenameVariants(for: item.filename)
+
+        var prefixes = ["", "/DCIM", "/SD0/DCIM", "/tmp/SD0/DCIM"]
+        if let remembered = rememberedWorkingPrefix {
+            prefixes.removeAll(where: { $0 == remembered })
+            prefixes.insert(remembered, at: 0)
+        }
+
+        var candidateURLs: [URL] = []
+        for prefix in prefixes {
+            for vname in nameVariants {
+                let urlStr = "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)\(prefix)/\(cleanFolder)/\(vname)"
+                if let u = URL(string: urlStr), !candidateURLs.contains(u) {
+                    candidateURLs.append(u)
+                }
+            }
+        }
+
+        discoverCherokeeExactLink(folder: cleanFolder, filename: item.filename) { [weak self] discoveredURL in
+            guard let self = self else { completion(nil); return }
+            var finalCandidates = candidateURLs
+            if let disc = discoveredURL {
+                finalCandidates.insert(disc, at: 0)
+            }
+            self.downloadNextCandidate(candidates: finalCandidates, item: item, completion: completion)
+        }
+    }
+
+    private func downloadNextCandidate(candidates: [URL], item: SDFileItem, completion: @escaping (URL?) -> Void) {
+        guard let currentURL = candidates.first else {
+            completion(nil)
+            return
+        }
+
+        let remaining = Array(candidates.dropFirst())
+        var req = URLRequest(url: currentURL)
+        req.timeoutInterval = 8.0
+
+        let task = session.downloadTask(with: req) { [weak self] localURL, response, _ in
+            guard let self = self else { completion(nil); return }
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+            if statusCode == 200, let localURL = localURL {
+                let pathStr = currentURL.path
+                if pathStr.contains("/DCIM/") {
+                    self.rememberedWorkingPrefix = "/DCIM"
+                } else if pathStr.contains("/SD0/DCIM/") {
+                    self.rememberedWorkingPrefix = "/SD0/DCIM"
+                } else if pathStr.contains("/tmp/SD0/DCIM/") {
+                    self.rememberedWorkingPrefix = "/tmp/SD0/DCIM"
+                } else {
+                    self.rememberedWorkingPrefix = ""
+                }
+
+                let ext = item.isVideo ? "MP4" : "JPG"
+                let safeName = "MiSphere_temp_\(UUID().uuidString).\(ext)"
+                let dest = FileManager.default.temporaryDirectory.appendingPathComponent(safeName)
+                try? FileManager.default.removeItem(at: dest)
+                do {
+                    try FileManager.default.copyItem(at: localURL, to: dest)
+                    completion(dest)
+                } catch {
+                    completion(nil)
+                }
+            } else {
+                self.downloadNextCandidate(candidates: remaining, item: item, completion: completion)
+            }
+        }
+        task.resume()
+    }
+
     private func filenameVariants(for filename: String) -> [String] {
         let clean = filename.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         var variants: [String] = []

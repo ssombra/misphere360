@@ -10,6 +10,8 @@ struct ContentView: View {
     @State private var latestPhotoItem: SDFileItem? = nil
     @State private var latestStitchedImage: UIImage? = nil
     @State private var isLoadingLatestPhoto = false
+    @State private var latestPhotoStatus = "Cargando captura 360°..."
+    @State private var loadErrorMessage: String? = nil
     @State private var selectedPreviewItem: SDFileItem? = nil
 
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0) // #FF6700
@@ -62,12 +64,21 @@ struct ContentView: View {
             location.startTracking()
             camera.checkAndReconnectIfNeeded()
             if camera.isConnected {
-                loadLatestPhoto()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    loadLatestPhoto()
+                }
             }
         }
         .onChange(of: camera.isConnected) { isConnected in
             if isConnected {
-                loadLatestPhoto()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    loadLatestPhoto()
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CameraPhotoSavedNotification"))) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                loadLatestPhoto(force: true)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
@@ -292,7 +303,7 @@ struct ContentView: View {
                             ProgressView()
                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                 .scaleEffect(1.2)
-                            Text("Cargando captura 360°...")
+                            Text(latestPhotoStatus)
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(.white.opacity(0.85))
                         }
@@ -306,11 +317,19 @@ struct ContentView: View {
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(.white)
 
-                            Text("Dispara una foto o pulsa cargar para explorar aquí en 360°")
-                                .font(.system(size: 11))
-                                .foregroundColor(.white.opacity(0.60))
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 24)
+                            if let err = loadErrorMessage {
+                                Text(err)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.orange)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 20)
+                            } else {
+                                Text("Dispara una foto o pulsa cargar para explorar aquí en 360°")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.60))
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 24)
+                            }
 
                             Button {
                                 let impact = UIImpactFeedbackGenerator(style: .medium)
@@ -709,12 +728,14 @@ struct ContentView: View {
     private func loadLatestPhoto(force: Bool = false) {
         guard camera.isConnected, !isLoadingLatestPhoto else { return }
         isLoadingLatestPhoto = true
+        loadErrorMessage = nil
+        latestPhotoStatus = "Buscando última captura..."
 
-        camera.fetchSDFileList { files in
-            let photoFiles = files.filter { !$0.isVideo }
-            guard let mostRecent = photoFiles.first else {
+        camera.fetchLatestPhotoItem { photoItem in
+            guard let mostRecent = photoItem else {
                 DispatchQueue.main.async {
                     self.isLoadingLatestPhoto = false
+                    self.loadErrorMessage = "No se encontraron fotos en la microSD."
                 }
                 return
             }
@@ -727,30 +748,37 @@ struct ContentView: View {
                 return
             }
 
-            self.latestPhotoItem = mostRecent
+            DispatchQueue.main.async {
+                self.latestPhotoItem = mostRecent
+                self.latestPhotoStatus = "Descargando \(mostRecent.filename)..."
+            }
 
-            DispatchQueue.global(qos: .userInitiated).async {
-                let cleanFolder = mostRecent.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                let filename = mostRecent.filename
-                let clean = filename.hasSuffix("AA.JPG") ? String(filename.dropLast(6)) + ".JPG" : filename
-                let urlString = "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)/DCIM/\(cleanFolder)/\(clean)"
-
-                guard let url = URL(string: urlString),
-                      let data = try? Data(contentsOf: url) else {
+            MediaDownloader.shared.downloadToTemporaryFile(item: mostRecent) { localURL in
+                guard let localURL = localURL else {
                     DispatchQueue.main.async {
                         self.isLoadingLatestPhoto = false
+                        self.loadErrorMessage = "No se pudo descargar \(mostRecent.filename) de la cámara."
                     }
                     return
                 }
 
-                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("latest_preview_\(UUID().uuidString).JPG")
-                try? data.write(to: tempURL)
-                let stitched = PhotoStitcher.shared.stitchForInteractivePreview(from: tempURL, maxPixelSize: 2048)
-                try? FileManager.default.removeItem(at: tempURL)
-
                 DispatchQueue.main.async {
-                    self.latestStitchedImage = stitched
-                    self.isLoadingLatestPhoto = false
+                    self.latestPhotoStatus = "Generando proyección 360°..."
+                }
+
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let stitched = PhotoStitcher.shared.stitchForInteractivePreview(from: localURL, maxPixelSize: 2048)
+                    try? FileManager.default.removeItem(at: localURL)
+
+                    DispatchQueue.main.async {
+                        if let stitched = stitched {
+                            self.latestStitchedImage = stitched
+                            self.loadErrorMessage = nil
+                        } else {
+                            self.loadErrorMessage = "Error al procesar panorama 360°"
+                        }
+                        self.isLoadingLatestPhoto = false
+                    }
                 }
             }
         }

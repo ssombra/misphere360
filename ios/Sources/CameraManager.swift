@@ -406,6 +406,7 @@ public class CameraManager: ObservableObject {
                 if msgId == 8193 {
                     // Foto disparada físicamente en la cámara: congelar GPS de ese segundo exacto
                     LocationManager.shared.recordCurrentShotLocation()
+                    NotificationCenter.default.post(name: NSNotification.Name("CameraPhotoSavedNotification"), object: nil)
                 }
                 self.fetchBatteryStatus()
                 self.fetchStorageStatus()
@@ -679,6 +680,34 @@ public class CameraManager: ObservableObject {
                     completion(files.sorted(by: { $0.filename > $1.filename }))
                 }
             }
+        }
+    }
+
+    public func fetchLatestPhotoItem(completion: @escaping (SDFileItem?) -> Void) {
+        listDCIMFolders { folders in
+            let sortedFolders = folders.sorted(by: >)
+            guard !sortedFolders.isEmpty else {
+                completion(nil)
+                return
+            }
+
+            func checkFolder(index: Int) {
+                guard index < min(sortedFolders.count, 5) else {
+                    completion(nil)
+                    return
+                }
+                let folder = sortedFolders[index]
+                self.listFilesInFolder(folder) { files in
+                    let photos = files.filter { !$0.isVideo }
+                    if let firstPhoto = photos.first {
+                        completion(firstPhoto)
+                    } else {
+                        checkFolder(index: index + 1)
+                    }
+                }
+            }
+
+            checkFolder(index: 0)
         }
     }
 
