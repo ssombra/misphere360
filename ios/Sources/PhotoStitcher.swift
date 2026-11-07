@@ -13,9 +13,17 @@ public enum StitchMode: String, CaseIterable, Identifiable {
 
     public var title: String {
         switch self {
-        case .stitched360: return "🌐 Solo 360°"
-        case .both: return "📦 Ambas"
-        case .original: return "🔘 Solo Original"
+        case .stitched360: return "Solo 360° (Recomendado)"
+        case .both: return "Ambas (Original + 360°)"
+        case .original: return "Solo Original (microSD)"
+        }
+    }
+
+    public var systemImage: String {
+        switch self {
+        case .stitched360: return "globe"
+        case .both: return "square.stack.3d.down.right"
+        case .original: return "doc"
         }
     }
 

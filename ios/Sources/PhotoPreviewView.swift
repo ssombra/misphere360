@@ -110,7 +110,7 @@ public struct PhotoPreviewView: View {
 
                 Spacer()
 
-                // 3. Botones Flotantes Inferiores (Estilo iOS redondo, ultra-limpio y no invasivo)
+                // 3. Botones Flotantes Inferiores (Estilo Apple translúcido e íconos blancos)
                 if stitchedImage != nil {
                     HStack(spacing: 28) {
                         // 1. Borrar con confirmación
@@ -119,13 +119,13 @@ public struct PhotoPreviewView: View {
                         } label: {
                             Image(systemName: "trash")
                                 .font(.system(size: 20, weight: .medium))
-                                .foregroundColor(.red.opacity(0.95))
+                                .foregroundColor(.white)
                                 .frame(width: 50, height: 50)
                                 .background(.ultraThinMaterial)
                                 .background(Color.black.opacity(0.45))
                                 .clipShape(Circle())
                                 .overlay(
-                                    Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                                    Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
                                 )
                                 .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
                         }
@@ -144,42 +144,33 @@ public struct PhotoPreviewView: View {
                                 .background(Color.black.opacity(0.45))
                                 .clipShape(Circle())
                                 .overlay(
-                                    Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                                    Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
                                 )
                                 .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
                         }
 
                         // 3. Descarga / Guardar en Fotos
                         Menu {
-                            Button {
-                                onDownloadRequested?(.stitched360)
-                                dismiss()
-                            } label: {
-                                Label("Solo 360° (Recomendado)", systemImage: "globe")
-                            }
-                            Button {
-                                onDownloadRequested?(.both)
-                                dismiss()
-                            } label: {
-                                Label("Ambas (Original + 360°)", systemImage: "square.stack.3d.down.right")
-                            }
-                            Button {
-                                onDownloadRequested?(.original)
-                                dismiss()
-                            } label: {
-                                Label("Solo Original (microSD)", systemImage: "doc")
+                            ForEach(StitchMode.allCases) { mode in
+                                Button {
+                                    onDownloadRequested?(mode)
+                                    dismiss()
+                                } label: {
+                                    Label(mode.title, systemImage: mode.systemImage)
+                                }
                             }
                         } label: {
                             Image(systemName: "square.and.arrow.down")
                                 .font(.system(size: 20, weight: .semibold))
                                 .foregroundColor(.white)
                                 .frame(width: 50, height: 50)
-                                .background(brandOrange)
+                                .background(.ultraThinMaterial)
+                                .background(Color.black.opacity(0.45))
                                 .clipShape(Circle())
                                 .overlay(
-                                    Circle().stroke(Color.white.opacity(0.25), lineWidth: 0.5)
+                                    Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
                                 )
-                                .shadow(color: brandOrange.opacity(0.4), radius: 8, x: 0, y: 4)
+                                .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
                         }
                     }
                     .padding(.bottom, 32)

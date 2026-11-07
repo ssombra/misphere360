@@ -32,6 +32,7 @@ struct GalleryView: View {
     // Filtros de fecha y guardado
     @State private var activeFilter: GalleryFilterType = .last7Days
     @State private var showDatePickerSheet = false
+    @State private var showStorageInfoSheet = false
     @State private var customStartDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
     @State private var customEndDate: Date = Date()
     @AppStorage("defaultStitchMode") private var selectedStitchMode: StitchMode = .stitched360
@@ -59,18 +60,13 @@ struct GalleryView: View {
                 darkBg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    // 1. Barra de Almacenamiento microSD (Compacta)
-                    compactStorageBar
-                        .padding(.horizontal, 16)
-                        .padding(.top, 6)
-                        .padding(.bottom, 6)
-
-                    // 2. Barra de Filtros de Fecha (7 Días, 30 Días, Todo, Filtrar) + Modo
+                    // Barra de Filtros de Fecha (7 Días, 30 Días, Todo, Filtrar) + Modo de Descarga
                     filterAndModeBar
                         .padding(.horizontal, 16)
+                        .padding(.top, 10)
                         .padding(.bottom, 8)
 
-                    // 3. Cuadrícula de Archivos
+                    // Cuadrícula de Archivos
                     if isLoading && allFiles.isEmpty {
                         Spacer()
                         VStack(spacing: 14) {
@@ -90,7 +86,7 @@ struct GalleryView: View {
                         mainTimelineGrid
                     }
 
-                    // 4. Barra Inferior de Acciones en Modo Selección
+                    // Barra Inferior de Acciones en Modo Selección
                     if isSelectionMode && !selectedItemIDs.isEmpty {
                         selectionActionBar
                     }
@@ -118,24 +114,66 @@ struct GalleryView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     if isSelectionMode {
-                        Button("Cancelar") {
+                        Button {
                             isSelectionMode = false
                             selectedItemIDs.removeAll()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 36, height: 36)
+                                .background(Color.white.opacity(0.12))
+                                .clipShape(Circle())
                         }
                     } else {
-                        Button(allFiles.isEmpty ? "" : "Seleccionar") {
+                        Button {
+                            let impact = UIImpactFeedbackGenerator(style: .light)
+                            impact.impactOccurred()
                             isSelectionMode = true
+                        } label: {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 36, height: 36)
+                                .background(Color.white.opacity(0.12))
+                                .clipShape(Circle())
                         }
-                        .foregroundColor(brandOrange)
+                        .disabled(allFiles.isEmpty)
+                        .opacity(allFiles.isEmpty ? 0.35 : 1.0)
                     }
                 }
 
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Cerrar") { dismiss() }
+                ToolbarItemGroup(placement: .confirmationAction) {
+                    Button {
+                        let impact = UIImpactFeedbackGenerator(style: .light)
+                        impact.impactOccurred()
+                        showStorageInfoSheet = true
+                    } label: {
+                        Image(systemName: "info")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(Circle())
+                    }
+
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(Circle())
+                    }
                 }
             }
             .onAppear {
                 initialLoad()
+            }
+            .sheet(isPresented: $showStorageInfoSheet) {
+                StorageInfoSheetView()
             }
             .sheet(isPresented: $showDatePickerSheet) {
                 datePickerSheetView
@@ -164,31 +202,6 @@ struct GalleryView: View {
                 }
             }
         }
-    }
-
-    // MARK: - Barra de Almacenamiento Compacta
-
-    private var compactStorageBar: some View {
-        HStack {
-            HStack(spacing: 6) {
-                Image(systemName: "sdcard.fill")
-                    .foregroundColor(brandOrange)
-                    .font(.caption)
-                Text("\(camera.sdFreeMB / 1024) GB libres de \(camera.sdTotalMB / 1024) GB")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.9))
-            }
-
-            Spacer()
-
-            Text("\(camera.remainJPG) fotos · \(camera.remainVideo)s")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(cardBg)
-        .cornerRadius(10)
     }
 
     // MARK: - Barra de Filtros de Fecha y Modo de Guardado
@@ -221,31 +234,27 @@ struct GalleryView: View {
 
             Spacer()
 
-            // Menú de Selección de Modo de Guardado
+            // Menú de Selección de Modo de Guardado (Ícono blanco de descarga + SF Symbols)
             Menu {
                 ForEach(StitchMode.allCases) { mode in
                     Button {
                         selectedStitchMode = mode
                     } label: {
-                        HStack {
-                            Text(mode.title)
-                            if selectedStitchMode == mode {
-                                Image(systemName: "checkmark")
-                            }
-                        }
+                        Label(mode.title, systemImage: mode.systemImage)
                     }
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "gearshape")
+                HStack(spacing: 5) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 11, weight: .semibold))
                     Text(selectedStitchMode == .stitched360 ? "360°" : (selectedStitchMode == .both ? "Ambas" : "Orig"))
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 11.5, weight: .bold))
                 }
-                .padding(.horizontal, 9)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color.white.opacity(0.10))
+                .background(Color.white.opacity(0.12))
                 .foregroundColor(.white)
-                .cornerRadius(8)
+                .cornerRadius(16)
             }
         }
     }
@@ -262,8 +271,8 @@ struct GalleryView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(isSelected ? brandOrange : Color.white.opacity(0.09))
-            .foregroundColor(isSelected ? .white : .white.opacity(0.85))
+            .background(isSelected ? Color.white : Color.white.opacity(0.10))
+            .foregroundColor(isSelected ? Color.black : Color.white.opacity(0.85))
             .cornerRadius(16)
         }
         .buttonStyle(.plain)
@@ -359,10 +368,16 @@ struct GalleryView: View {
                                 .foregroundColor(isSelected ? brandOrange : .white.opacity(0.8))
                                 .padding(6)
                         } else {
-                            Button {
-                                downloader.saveMediaToCameraRoll(item: item, mode: selectedStitchMode) { ok, msg in
-                                    alertMessage = msg
-                                    showAlert = true
+                            Menu {
+                                ForEach(StitchMode.allCases) { mode in
+                                    Button {
+                                        downloader.saveMediaToCameraRoll(item: item, mode: mode) { ok, msg in
+                                            alertMessage = msg
+                                            showAlert = true
+                                        }
+                                    } label: {
+                                        Label(mode.title, systemImage: mode.systemImage)
+                                    }
                                 }
                             } label: {
                                 Image(systemName: "arrow.down.to.line")
@@ -700,5 +715,103 @@ struct GalleryView: View {
         }
 
         downloadNext(items: targets, successCount: 0)
+    }
+}
+
+/// Hoja modal con información de almacenamiento de la microSD
+struct StorageInfoSheetView: View {
+    @ObservedObject var camera = CameraManager.shared
+    @Environment(\.dismiss) var dismiss
+
+    var usedMB: Int {
+        max(0, camera.sdTotalMB - camera.sdFreeMB)
+    }
+    var usedPercent: Double {
+        guard camera.sdTotalMB > 0 else { return 0 }
+        return min(1.0, Double(usedMB) / Double(camera.sdTotalMB))
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Capacidad de la Memoria") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Espacio Ocupado")
+                                .font(.subheadline)
+                            Spacer()
+                            Text(String(format: "%.1f GB de %.1f GB", Double(usedMB) / 1024.0, Double(camera.sdTotalMB) / 1024.0))
+                                .font(.subheadline.weight(.semibold))
+                        }
+
+                        ProgressView(value: usedPercent)
+                            .tint(usedPercent > 0.9 ? .red : .primary)
+
+                        HStack {
+                            Text(String(format: "%.1f GB libres", Double(camera.sdFreeMB) / 1024.0))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(String(format: "%.0f%% utilizado", usedPercent * 100))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section("Estimación de Tomas Restantes") {
+                    HStack {
+                        Label("Fotos 360° Restantes", systemImage: "photo")
+                        Spacer()
+                        Text("\(camera.remainJPG)")
+                            .fontWeight(.semibold)
+                    }
+                    HStack {
+                        Label("Tiempo de Video Restante", systemImage: "video")
+                        Spacer()
+                        Text(formatDuration(seconds: camera.remainVideo))
+                            .fontWeight(.semibold)
+                    }
+                }
+
+                Section("Tarjeta de Memoria") {
+                    HStack {
+                        Label("Ruta en Cámara", systemImage: "sdcard")
+                        Spacer()
+                        Text("/tmp/SD0/DCIM")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+                    HStack {
+                        Label("Estado", systemImage: "checkmark.circle.fill")
+                        Spacer()
+                        Text("Montada y Lista")
+                            .foregroundColor(.green)
+                            .font(.subheadline.weight(.medium))
+                    }
+                }
+            }
+            .navigationTitle("Detalles de Almacenamiento")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Listo") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func formatDuration(seconds: Int) -> String {
+        let mins = seconds / 60
+        let hrs = mins / 60
+        let remMins = mins % 60
+        if hrs > 0 {
+            return "\(hrs)h \(remMins)m (\(seconds)s)"
+        }
+        return "\(mins) min (\(seconds)s)"
     }
 }
