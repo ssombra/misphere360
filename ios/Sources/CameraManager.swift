@@ -55,6 +55,7 @@ public class CameraManager: ObservableObject {
     @Published public var videoSlowMo: Int = 0      // 0: Normal, 1: 2x
     @Published public var videoEV: Double = 0.0
     @Published public var videoWB: Int = 0
+    @Published public var videoLoop: Int = 0        // 0: Desactivado, 1: 1 min, 2: 2 min, 5: 5 min
 
     // ALMACENAMIENTO SD
     @Published public var sdTotalMB: Int = 0
@@ -62,6 +63,13 @@ public class CameraManager: ObservableObject {
     @Published public var remainJPG: Int = 0
     @Published public var remainVideo: Int = 0
     @Published public var dcimFolders: [String] = []
+
+    // CONEXIÓN WI-FI DE LA CÁMARA
+    @Published public var wifiSSID: String = ""
+    @Published public var wifiPassword: String = ""
+
+    // MODO DE PREVISUALIZACIÓN 360°
+    @Published public var previewMode: String = "Mirror ball"
 
     // INFORMACIÓN DEL DISPOSITIVO
     @Published public var deviceName: String = ""
@@ -382,6 +390,19 @@ public class CameraManager: ObservableObject {
                 if let rjpg = obj["remain_jpg"] as? Int { self.remainJPG = rjpg }
                 if let rvid = obj["remain_video"] as? Int { self.remainVideo = rvid }
 
+            case 1539: // GET_WIFI
+                if let paramStr = obj["param"] as? String {
+                    for line in paramStr.components(separatedBy: "\n") {
+                        let parts = line.components(separatedBy: "=")
+                        if parts.count >= 2 {
+                            let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                            let val = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                            if key == "AP_SSID" { self.wifiSSID = val }
+                            else if key == "AP_PASSWD" { self.wifiPassword = val }
+                        }
+                    }
+                }
+
             case 4097: // GET_SERIAL_NO
                 if let sn = obj["param"] as? String, self.serialNumber.isEmpty {
                     self.serialNumber = sn
@@ -391,6 +412,7 @@ public class CameraManager: ObservableObject {
                 if let b = obj["battery"] as? Int { self.updateBattery(from: b) }
                 if let pres = obj["p_res"] as? Int { self.photoRes = pres }
                 if let vres = obj["v_res"] as? Int { self.videoRes = vres }
+                if let loopVal = obj["loop"] as? Int { self.videoLoop = loopVal }
                 if let wb = obj["still_wb"] as? Int { self.wb = wb }
                 if let iso = obj["still_iso"] as? Int { self.iso = iso }
                 if let ev = obj["still_ev"] as? Int { self.ev = Double(ev) / 2.0 }
@@ -468,6 +490,7 @@ public class CameraManager: ObservableObject {
         sendCommand(msgId: 4365, param: nil) // Camera status
         sendCommand(msgId: 4361, param: nil) // Battery
         sendCommand(msgId: 4358, param: nil) // Storage
+        sendCommand(msgId: 1539, param: nil) // Wi-Fi info
     }
 
     public func fetchBatteryStatus() {
@@ -501,6 +524,7 @@ public class CameraManager: ObservableObject {
         sendCommand(msgId: 4364, param: nil)
         sendCommand(msgId: 4365, param: nil)
         sendCommand(msgId: 4358, param: nil)
+        sendCommand(msgId: 1539, param: nil)
     }
 
     // MARK: - Acciones y Ajustes de FOTO
@@ -646,6 +670,33 @@ public class CameraManager: ObservableObject {
     public func setVideoWB(_ val: Int) {
         sendCommand(msgId: 5136, param: "\(val)")
         DispatchQueue.main.async { self.videoWB = val }
+    }
+
+    public func setVideoLoop(_ val: Int) {
+        // Enviar tanto 4615 como 4614 según la variante de firmware
+        sendCommand(msgId: 4615, param: "\(val)")
+        sendCommand(msgId: 4614, param: "\(val)")
+        DispatchQueue.main.async { self.videoLoop = val }
+    }
+
+    public func fetchWiFiSettings() {
+        sendCommand(msgId: 1539, param: nil)
+    }
+
+    public func setWiFiSettings(ssid: String, password: String, completion: ((Bool) -> Void)? = nil) {
+        let payload = "AP_SSID=\(ssid)\nAP_PASSWD=\(password)\n"
+        sendCommand(msgId: 1540, param: payload) { resp in
+            let rval = resp["rval"] as? Int ?? -1
+            DispatchQueue.main.async {
+                if rval == 0 {
+                    self.wifiSSID = ssid
+                    self.wifiPassword = password
+                    completion?(true)
+                } else {
+                    completion?(false)
+                }
+            }
+        }
     }
 
     // MARK: - GPS y Hardware
