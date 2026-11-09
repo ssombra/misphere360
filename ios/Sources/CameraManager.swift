@@ -63,6 +63,30 @@ public class CameraManager: ObservableObject {
     @Published public var remainVideo: Int = 0
     @Published public var dcimFolders: [String] = []
 
+    // INFORMACIÓN DEL DISPOSITIVO
+    @Published public var deviceName: String = ""
+    @Published public var serialNumber: String = ""
+    @Published public var firmwareVersion: String = ""
+
+    public var formattedStorageSpace: String {
+        guard isConnected, sdTotalMB > 0 else { return isConnected ? "Calculando..." : "No disponible" }
+        let freeGB = Double(sdFreeMB) / 1024.0
+        let totalGB = Double(sdTotalMB) / 1024.0
+        return String(format: "%.2f GB libres de %.2f GB", freeGB, totalGB)
+    }
+
+    public var formattedRemainVideo: String {
+        guard isConnected, remainVideo > 0 else { return isConnected ? "Calculando..." : "No disponible" }
+        let totalSeconds = remainVideo > 500 ? remainVideo : remainVideo * 60
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes) min"
+        }
+    }
+
     // Callbacks pendientes para comandos TCP asíncronos (ej. list_dir)
     // Callbacks pendientes para comandos TCP asíncronos (cola FIFO por msgId)
     private var pendingCallbacks: [Int: [([String: Any]) -> Void]] = [:]
@@ -358,6 +382,11 @@ public class CameraManager: ObservableObject {
                 if let rjpg = obj["remain_jpg"] as? Int { self.remainJPG = rjpg }
                 if let rvid = obj["remain_video"] as? Int { self.remainVideo = rvid }
 
+            case 4097: // GET_SERIAL_NO
+                if let sn = obj["param"] as? String, self.serialNumber.isEmpty {
+                    self.serialNumber = sn
+                }
+
             case 4364: // GET_DEVICE
                 if let b = obj["battery"] as? Int { self.updateBattery(from: b) }
                 if let pres = obj["p_res"] as? Int { self.photoRes = pres }
@@ -371,6 +400,14 @@ public class CameraManager: ObservableObject {
                 }
                 if let vwb = obj["video_wb"] as? Int { self.videoWB = vwb }
                 if let vev = obj["video_ev"] as? Int { self.videoEV = Double(vev) / 2.0 }
+                if let sn = obj["sn"] as? String { self.serialNumber = sn }
+                if let product = obj["product"] as? String { self.deviceName = product }
+                if let ver = obj["ver"] as? String {
+                    let mainVer = ver.components(separatedBy: ";").first ?? ver
+                    self.firmwareVersion = mainVer
+                }
+                if let cjpg = obj["cam_jpg"] as? Int, self.remainJPG == 0 { self.remainJPG = cjpg }
+                if let cmp4 = obj["cam_mp4"] as? Int, self.remainVideo == 0 { self.remainVideo = cmp4 * 60 }
 
             case 4365: // GET_CAMERA
                 if let mode = obj["mode"] as? Int { self.currentMode = mode }

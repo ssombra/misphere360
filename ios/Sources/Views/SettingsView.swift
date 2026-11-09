@@ -55,6 +55,43 @@ struct SettingsView: View {
                     }
                 }
 
+                Section(header: Text("Tarjeta MicroSD")) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Capacidad")
+                            Spacer()
+                            Text(camera.formattedStorageSpace)
+                                .foregroundColor(.secondary)
+                        }
+
+                        if camera.isConnected && camera.sdTotalMB > 0 {
+                            let usedPercent = Double(camera.sdTotalMB - camera.sdFreeMB) / Double(camera.sdTotalMB)
+                            ProgressView(value: max(0.0, min(1.0, usedPercent)))
+                                .tint(usedPercent > 0.90 ? Color.red : (usedPercent > 0.75 ? Color.orange : Color.blue))
+                        }
+                    }
+                    .padding(.vertical, 2)
+
+                    HStack {
+                        Text("Fotos restantes")
+                        Spacer()
+                        if camera.isConnected {
+                            Text(camera.remainJPG > 0 ? "\(camera.remainJPG.formatted()) fotos" : "Calculando...")
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("No disponible")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    HStack {
+                        Text("Video restante")
+                        Spacer()
+                        Text(camera.formattedRemainVideo)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
                 Section(header: Text("Almacenamiento Local del iPhone")) {
                     Button(role: .destructive) {
                         ThumbnailCache.shared.clearAllCache()
@@ -65,6 +102,33 @@ struct SettingsView: View {
                 }
 
                 Section(header: Text("Acerca de")) {
+                    if camera.isConnected && !camera.deviceName.isEmpty {
+                        HStack {
+                            Text("Nombre de Dispositivo")
+                            Spacer()
+                            Text(camera.deviceName)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    if camera.isConnected && !camera.serialNumber.isEmpty {
+                        HStack {
+                            Text("Número de Serie")
+                            Spacer()
+                            Text(camera.serialNumber)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    if camera.isConnected && !camera.firmwareVersion.isEmpty {
+                        HStack {
+                            Text("Firmware de Cámara")
+                            Spacer()
+                            Text(camera.firmwareVersion)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
                     HStack {
                         Text("Modelo")
                         Spacer()
@@ -83,6 +147,12 @@ struct SettingsView: View {
                         Text("1.0.0 iOS")
                             .foregroundColor(.secondary)
                     }
+                }
+            }
+            .onAppear {
+                if camera.isConnected {
+                    camera.fetchStorageStatus()
+                    camera.sendCommand(msgId: 4364, param: nil)
                 }
             }
             .alert("Caché Borrado", isPresented: $showCacheAlert) {
