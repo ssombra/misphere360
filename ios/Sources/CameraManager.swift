@@ -293,8 +293,8 @@ public class CameraManager: ObservableObject {
     }
 
     public func sendCustomPacket(_ dict: [String: Any], msgId: Int, onResponse: (([String: Any]) -> Void)? = nil) {
-        commandQueue.async { [weak self] in
-            guard let self = self, self.isConnected else {
+        queue.async { [weak self] in
+            guard let self = self, let connection = self.connection, connection.state == .ready else {
                 onResponse?(["rval": -1, "error": "No conectado"])
                 return
             }
