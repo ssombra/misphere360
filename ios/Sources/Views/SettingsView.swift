@@ -11,6 +11,11 @@ struct SettingsView: View {
     @State private var showWiFiPassword = false
     @State private var showEditWiFiSheet = false
 
+    @State private var showGyroPrompt = false
+    @State private var isCalibratingGyro = false
+    @State private var gyroAlertMessage = ""
+    @State private var showGyroResultAlert = false
+
     var body: some View {
         NavigationView {
             Form {
@@ -117,11 +122,22 @@ struct SettingsView: View {
                     }
                 }
 
-                Section(header: Text("Calibración")) {
-                    Button {
-                        camera.sendCommand(msgId: 6165, param: nil)
-                    } label: {
-                        Label("Calibrar Giroscopio de la Cámara", systemImage: "gyroscope")
+                Section(header: Text("Calibración"), footer: Text("Calibra el sensor giroscópico y acelerómetro (IMU) de la cámara para mantener el horizonte 100% nivelado.")) {
+                    if isCalibratingGyro {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text("Calibrando giroscopio... no muevas la cámara")
+                                .font(.subheadline)
+                                .foregroundColor(.orange)
+                        }
+                        .padding(.vertical, 4)
+                    } else {
+                        Button {
+                            showGyroPrompt = true
+                        } label: {
+                            Label("Calibrar Giroscopio de la Cámara", systemImage: "gyroscope")
+                        }
+                        .disabled(!camera.isConnected || isCalibratingGyro)
                     }
                 }
 
@@ -229,6 +245,32 @@ struct SettingsView: View {
             .sheet(isPresented: $showEditWiFiSheet) {
                 WiFiEditSheetView()
             }
+            .confirmationDialog(
+                "Calibrar Giroscopio",
+                isPresented: $showGyroPrompt,
+                titleVisibility: .visible
+            ) {
+                Button("Iniciar Calibración") {
+                    isCalibratingGyro = true
+                    let impact = UIImpactFeedbackGenerator(style: .medium)
+                    impact.impactOccurred()
+                    camera.calibrateGyroscope { success, message in
+                        isCalibratingGyro = false
+                        gyroAlertMessage = message
+                        showGyroResultAlert = true
+                        let notify = UINotificationFeedbackGenerator()
+                        notify.notificationOccurred(success ? .success : .error)
+                    }
+                }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Coloca la cámara sobre una mesa o superficie completamente plana y horizontal. No muevas la cámara durante los 3 a 5 segundos que dura el proceso.")
+            }
+            .alert("Calibración del Giroscopio", isPresented: $showGyroResultAlert) {
+                Button("Entendido") {}
+            } message: {
+                Text(gyroAlertMessage)
+            }
             .alert("Caché Borrado", isPresented: $showCacheAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -253,6 +295,7 @@ struct WiFiEditSheetView: View {
     @State private var newSSID: String = ""
     @State private var newPass: String = ""
     @State private var isSaving: Bool = false
+    @State private var didSaveSuccessfully: Bool = false
     @State private var alertMsg: String = ""
     @State private var showAlert: Bool = false
 
@@ -268,7 +311,7 @@ struct WiFiEditSheetView: View {
                         .textInputAutocapitalization(.never)
                 }
 
-                Section(footer: Text("Si cambias la contraseña o el nombre de red, la cámara reiniciará su antena Wi-Fi y deberás reconectar tu iPhone a la nueva red en los Ajustes de iOS.")) {
+                Section(footer: Text("Si cambias la contraseña o el nombre de red, la cámara emitirá un pitido, reiniciará su antena Wi-Fi y deberás reconectar tu iPhone a la nueva red en los Ajustes de iOS.")) {
                     Button {
                         guard newPass.count >= 8 else {
                             alertMsg = "La contraseña debe tener al menos 8 caracteres."
@@ -278,11 +321,12 @@ struct WiFiEditSheetView: View {
                         isSaving = true
                         camera.setWiFiSettings(ssid: newSSID, password: newPass) { success in
                             isSaving = false
+                            didSaveSuccessfully = success
                             if success {
-                                alertMsg = "Ajustes de Wi-Fi aplicados. La cámara se reiniciará con las nuevas credenciales."
+                                alertMsg = "¡Credenciales actualizadas! La cámara emitirá un pitido y reiniciará su antena Wi-Fi. Ve a los Ajustes de Wi-Fi de tu iPhone y reconéctate a '\(newSSID)' con tu nueva contraseña."
                                 showAlert = true
                             } else {
-                                alertMsg = "No se pudo actualizar el Wi-Fi. Comprueba la conexión."
+                                alertMsg = "No se pudo actualizar el Wi-Fi. Asegúrate de estar conectado a la cámara y que la contraseña tenga al menos 8 caracteres."
                                 showAlert = true
                             }
                         }
@@ -309,7 +353,11 @@ struct WiFiEditSheetView: View {
                 newPass = camera.wifiPassword
             }
             .alert("Wi-Fi de la Cámara", isPresented: $showAlert) {
-                Button("Entendido") { dismiss() }
+                Button("Entendido") {
+                    if didSaveSuccessfully {
+                        dismiss()
+                    }
+                }
             } message: {
                 Text(alertMsg)
             }

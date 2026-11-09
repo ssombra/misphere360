@@ -292,6 +292,36 @@ public class CameraManager: ObservableObject {
         }
     }
 
+    public func sendCustomPacket(_ dict: [String: Any], msgId: Int, onResponse: (([String: Any]) -> Void)? = nil) {
+        commandQueue.async { [weak self] in
+            guard let self = self, self.isConnected else {
+                onResponse?(["rval": -1, "error": "No conectado"])
+                return
+            }
+
+            let now = Date().timeIntervalSince1970
+            let elapsed = now - self.lastSendTime
+            if elapsed < 0.30 {
+                Thread.sleep(forTimeInterval: 0.30 - elapsed)
+            }
+
+            var packet = dict
+            if packet["token"] == nil {
+                packet["token"] = self.sessionToken
+            }
+            if packet["msg_id"] == nil {
+                packet["msg_id"] = msgId
+            }
+
+            if let onResponse = onResponse {
+                self.pendingCallbacks[msgId, default: []].append(onResponse)
+            }
+
+            self.sendRawJSON(packet)
+            self.lastSendTime = Date().timeIntervalSince1970
+        }
+    }
+
     private func sendRawJSON(_ dict: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let jsonString = String(data: data, encoding: .utf8) else { return }
@@ -461,6 +491,9 @@ public class CameraManager: ObservableObject {
             case 514: // FIN VIDEO
                 if rval == 0 { self.isRecording = false; self.lastStatusMessage = "Video guardado." }
 
+            case 6165: // GYRO_CALIB
+                if rval == 0 { self.lastStatusMessage = "Giroscopio calibrado." }
+
             case 8192, 8193: // EVENTO ASÍNCRONO DE FOTO (8193) O VIDEO (8192) GUARDADO
                 if msgId == 8193 {
                     // Foto disparada físicamente en la cámara: congelar GPS de ese segundo exacto
@@ -546,7 +579,7 @@ public class CameraManager: ObservableObject {
     }
 
     public func startLiveView(completion: ((Bool) -> Void)? = nil) {
-        sendCommand(msgId: 259, param: nil) { [weak self] resp in
+        sendCommand(msgId: 259, param: "none_force") { [weak self] resp in
             let rval = resp["rval"] as? Int ?? -1
             let ok = (rval == 0)
             DispatchQueue.main.async {
@@ -684,8 +717,13 @@ public class CameraManager: ObservableObject {
     }
 
     public func setWiFiSettings(ssid: String, password: String, completion: ((Bool) -> Void)? = nil) {
-        let payload = "AP_SSID=\(ssid)\nAP_PASSWD=\(password)\n"
-        sendCommand(msgId: 1540, param: payload) { resp in
+        let packet: [String: Any] = [
+            "msg_id": 5634,
+            "token": self.sessionToken,
+            "ssid": ssid,
+            "passwd": password
+        ]
+        sendCustomPacket(packet, msgId: 5634) { resp in
             let rval = resp["rval"] as? Int ?? -1
             DispatchQueue.main.async {
                 if rval == 0 {
@@ -694,6 +732,19 @@ public class CameraManager: ObservableObject {
                     completion?(true)
                 } else {
                     completion?(false)
+                }
+            }
+        }
+    }
+
+    public func calibrateGyroscope(completion: ((Bool, String) -> Void)? = nil) {
+        sendCommand(msgId: 6165, param: nil) { resp in
+            let rval = resp["rval"] as? Int ?? -1
+            DispatchQueue.main.async {
+                if rval == 0 {
+                    completion?(true, "Giroscopio calibrado correctamente.")
+                } else {
+                    completion?(false, "Error al calibrar giroscopio (código: \(rval)). Asegúrate de que la cámara permanezca totalmente quieta sobre una superficie plana.")
                 }
             }
         }
