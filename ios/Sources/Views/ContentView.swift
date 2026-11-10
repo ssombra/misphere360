@@ -15,10 +15,11 @@ struct ContentView: View {
     @State private var selectedPreviewItem: SDFileItem? = nil
 
     enum ViewfinderMode: String, CaseIterable {
+        case off = "Off"
         case photo = "Foto 360°"
         case live = "En Vivo"
     }
-    @State private var viewfinderMode: ViewfinderMode = .photo
+    @State private var viewfinderMode: ViewfinderMode = .off
 
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0) // #FF6700
     private let darkBg = Color(red: 0.05, green: 0.06, blue: 0.09)
@@ -69,14 +70,14 @@ struct ContentView: View {
         .onAppear {
             location.startTracking()
             camera.checkAndReconnectIfNeeded()
-            if camera.isConnected {
+            if camera.isConnected && viewfinderMode == .photo {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                     loadLatestPhoto()
                 }
             }
         }
         .onChange(of: camera.isConnected) { isConnected in
-            if isConnected {
+            if isConnected && viewfinderMode == .photo {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                     loadLatestPhoto()
                 }
@@ -217,27 +218,38 @@ struct ContentView: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
                 )
             } else {
-                // Zona Central: Visor 360° Interactivo o Visor en Vivo RTSP
+                // Zona Central: Visor 360° Interactivo, Visor en Vivo RTSP o Apagado (Off)
                 ZStack {
-                    if viewfinderMode == .live {
+                    if viewfinderMode == .off {
                         ZStack(alignment: .topLeading) {
-                            if camera.isLiveViewActive {
-                                LiveViewPlayerView()
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 200)
-                            } else {
-                                VStack(spacing: 10) {
-                                    ProgressView()
-                                        .tint(.white)
-                                    Text("Iniciando transmisión en vivo...")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.80))
-                                }
+                            VStack(spacing: 8) {
+                                Spacer()
+                                Image(systemName: "eye.slash")
+                                    .font(.system(size: 28, weight: .light))
+                                    .foregroundColor(.white.opacity(0.35))
+                                Text("Visor desactivado")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.65))
+                                Text("Selecciona 'Foto 360°' o 'En Vivo' para activar")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.35))
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 200)
+
+                            // Cabecera flotante
+                            HStack {
+                                modeSwitchPill
+                                Spacer()
+                            }
+                            .padding(10)
+                        }
+                    } else if viewfinderMode == .live {
+                        ZStack(alignment: .topLeading) {
+                            LiveViewPlayerView()
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 200)
-                                .background(Color.black)
-                                .cornerRadius(20)
-                            }
 
                             // Cabecera flotante
                             HStack {
@@ -412,15 +424,38 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Selector de Modo del Visor (Foto 360° vs En Vivo)
+    // MARK: - Selector de Modo del Visor (Off vs Foto 360° vs En Vivo)
 
     private var modeSwitchPill: some View {
         HStack(spacing: 0) {
+            // 1. Off
+            Button {
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
+                viewfinderMode = .off
+                camera.stopLiveView()
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "power")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("Off")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(viewfinderMode == .off ? Color.white.opacity(0.25) : Color.clear)
+                .clipShape(Capsule())
+            }
+
+            // 2. Foto 360°
             Button {
                 let impact = UIImpactFeedbackGenerator(style: .light)
                 impact.impactOccurred()
                 viewfinderMode = .photo
                 camera.stopLiveView()
+                if latestStitchedImage == nil && !isLoadingLatestPhoto {
+                    loadLatestPhoto()
+                }
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "globe")
@@ -428,12 +463,13 @@ struct ContentView: View {
                     Text("Foto 360°")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .padding(.horizontal, 9)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(viewfinderMode == .photo ? Color.white.opacity(0.25) : Color.clear)
                 .clipShape(Capsule())
             }
 
+            // 3. En Vivo
             Button {
                 let impact = UIImpactFeedbackGenerator(style: .light)
                 impact.impactOccurred()
@@ -447,7 +483,7 @@ struct ContentView: View {
                     Text("En Vivo")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .padding(.horizontal, 9)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(viewfinderMode == .live ? Color.white.opacity(0.25) : Color.clear)
                 .clipShape(Capsule())
