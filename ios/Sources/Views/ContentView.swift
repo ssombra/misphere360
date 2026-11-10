@@ -14,6 +14,12 @@ struct ContentView: View {
     @State private var loadErrorMessage: String? = nil
     @State private var selectedPreviewItem: SDFileItem? = nil
 
+    enum ViewfinderMode: String, CaseIterable {
+        case photo = "Foto 360°"
+        case live = "En Vivo"
+    }
+    @State private var viewfinderMode: ViewfinderMode = .photo
+
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0) // #FF6700
     private let darkBg = Color(red: 0.05, green: 0.06, blue: 0.09)
     private let cardBg = Color(red: 0.10, green: 0.12, blue: 0.18)
@@ -211,9 +217,39 @@ struct ContentView: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
                 )
             } else {
-                // Zona Central: Visor 360° Interactivo de la Última Captura
+                // Zona Central: Visor 360° Interactivo o Visor en Vivo RTSP
                 ZStack {
-                    if let image = latestStitchedImage {
+                    if viewfinderMode == .live {
+                        ZStack(alignment: .topLeading) {
+                            LiveViewPlayerView()
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 200)
+
+                            // Cabecera flotante
+                            HStack {
+                                modeSwitchPill
+                                Spacer()
+                            }
+                            .padding(10)
+
+                            // Pie flotante con sugerencia
+                            VStack {
+                                Spacer()
+                                HStack {
+                                    Spacer()
+                                    Text("Transmisión en Vivo (Dual Fisheye)")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.70))
+                                        .padding(.horizontal, 9)
+                                        .padding(.vertical, 3)
+                                        .background(Color.black.opacity(0.45))
+                                        .cornerRadius(6)
+                                    Spacer()
+                                }
+                                .padding(.bottom, 8)
+                            }
+                        }
+                    } else if let image = latestStitchedImage {
                         ZStack(alignment: .topLeading) {
                             Web360Viewer(image: image, enableMotion: false)
                                 .frame(maxWidth: .infinity)
@@ -223,21 +259,7 @@ struct ContentView: View {
 
                             // Cabecera flotante: Etiqueta y botones de acción
                             HStack {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "globe")
-                                        .font(.system(size: 11, weight: .bold))
-                                    Text("Última Captura 360°")
-                                        .font(.system(size: 11, weight: .semibold))
-                                }
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(.ultraThinMaterial)
-                                .background(Color.black.opacity(0.40))
-                                .clipShape(Capsule())
-                                .overlay(
-                                    Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
-                                )
+                                modeSwitchPill
 
                                 Spacer()
 
@@ -308,47 +330,58 @@ struct ContentView: View {
                                 .foregroundColor(.white.opacity(0.85))
                         }
                     } else {
-                        VStack(spacing: 8) {
-                            Image(systemName: "photo.on.rectangle.angled")
-                                .font(.system(size: 32, weight: .light))
-                                .foregroundColor(.white.opacity(0.65))
+                        ZStack(alignment: .topLeading) {
+                            VStack(spacing: 8) {
+                                Spacer()
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 32, weight: .light))
+                                    .foregroundColor(.white.opacity(0.65))
 
-                            Text("Visor 360° de Última Captura")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.white)
+                                Text("Visor 360° de Última Captura")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.white)
 
-                            if let err = loadErrorMessage {
-                                Text(err)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(.orange)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 20)
-                            } else {
-                                Text("Dispara una foto o pulsa cargar para explorar aquí en 360°")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.white.opacity(0.60))
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 24)
-                            }
-
-                            Button {
-                                let impact = UIImpactFeedbackGenerator(style: .medium)
-                                impact.impactOccurred()
-                                loadLatestPhoto(force: true)
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 11, weight: .bold))
-                                    Text("Cargar última foto")
-                                        .font(.system(size: 12, weight: .semibold))
+                                if let err = loadErrorMessage {
+                                    Text(err)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.orange)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal, 20)
+                                } else {
+                                    Text("Dispara una foto o pulsa cargar para explorar aquí en 360°")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.white.opacity(0.60))
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal, 24)
                                 }
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(Color.white)
-                                .clipShape(Capsule())
+
+                                Button {
+                                    let impact = UIImpactFeedbackGenerator(style: .medium)
+                                    impact.impactOccurred()
+                                    loadLatestPhoto(force: true)
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.clockwise")
+                                            .font(.system(size: 11, weight: .bold))
+                                        Text("Cargar última foto")
+                                            .font(.system(size: 12, weight: .semibold))
+                                    }
+                                    .foregroundColor(.black)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 7)
+                                    .background(Color.white)
+                                    .clipShape(Capsule())
+                                }
+                                .padding(.top, 4)
+                                Spacer()
                             }
-                            .padding(.top, 4)
+                            .frame(maxWidth: .infinity)
+
+                            HStack {
+                                modeSwitchPill
+                                Spacer()
+                            }
+                            .padding(10)
                         }
                     }
                 }
@@ -363,6 +396,57 @@ struct ContentView: View {
                 )
             }
         }
+    }
+
+    // MARK: - Selector de Modo del Visor (Foto 360° vs En Vivo)
+
+    private var modeSwitchPill: some View {
+        HStack(spacing: 0) {
+            Button {
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
+                viewfinderMode = .photo
+                camera.stopLiveView()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("Foto 360°")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(viewfinderMode == .photo ? Color.white.opacity(0.25) : Color.clear)
+                .clipShape(Capsule())
+            }
+
+            Button {
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
+                viewfinderMode = .live
+                camera.startLiveView()
+            } label: {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(camera.isLiveViewActive ? Color.red : Color.gray)
+                        .frame(width: 7, height: 7)
+                    Text("En Vivo")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(viewfinderMode == .live ? Color.white.opacity(0.25) : Color.clear)
+                .clipShape(Capsule())
+            }
+        }
+        .foregroundColor(.white)
+        .padding(2)
+        .background(.ultraThinMaterial)
+        .background(Color.black.opacity(0.40))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+        )
     }
 
     // MARK: - Selector de Modo (Íconos Foto y Video)

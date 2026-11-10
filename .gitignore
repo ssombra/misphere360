@@ -9,3 +9,4 @@ build/
 *.zip
 Mi Sphere 360.app
 session_log.json
+*.pdf

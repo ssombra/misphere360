@@ -571,10 +571,22 @@ public class CameraManager: ObservableObject {
     }
 
     public func takePhoto() {
+        let wasLive = isLiveViewActive
+        if wasLive {
+            stopLiveView()
+        }
         if timer > 0 {
             sendCommand(msgId: 4868, param: nil)
         } else {
             sendCommand(msgId: 4864, param: nil)
+        }
+        if wasLive {
+            let delay: Double = timer > 0 ? Double(timer) + 3.0 : 3.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                if self?.isConnected == true {
+                    self?.startLiveView()
+                }
+            }
         }
     }
 
