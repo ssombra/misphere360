@@ -84,10 +84,10 @@ final class VLCStreamViewController: UIViewController, VLCMediaPlayerDelegate {
         p.drawable = videoSurfaceView
 
         let media = VLCMedia(url: streamURL)
-        // Opciones idénticas a la aplicación oficial de VLC para iOS (RTSP sobre TCP con buffer estándar)
+        // Opciones estándar compatibles con VLCKit (diccionario [AnyHashable: Any])
         media.addOptions([
-            "--network-caching=300",
-            "--rtsp-tcp"
+            "network-caching": 300,
+            "rtsp-tcp": true
         ])
         p.media = media
         self.player = p
