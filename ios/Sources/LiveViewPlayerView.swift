@@ -84,9 +84,10 @@ final class VLCStreamViewController: UIViewController, VLCMediaPlayerDelegate {
         p.drawable = videoSurfaceView
 
         let media = VLCMedia(url: streamURL)
-        // Paso 1: Transporte nativo UDP (sin rtsp-tcp) para evitar retrasos y bloqueo de cola
+        // RTSP intercalado sobre TCP (imprescindible para la Xiaomi Mi Sphere 360)
         media.addOptions([
-            "network-caching": 300
+            "network-caching": 300,
+            "rtsp-tcp": true
         ])
         p.media = media
         self.player = p

@@ -221,9 +221,23 @@ struct ContentView: View {
                 ZStack {
                     if viewfinderMode == .live {
                         ZStack(alignment: .topLeading) {
-                            LiveViewPlayerView()
+                            if camera.isLiveViewActive {
+                                LiveViewPlayerView()
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 200)
+                            } else {
+                                VStack(spacing: 10) {
+                                    ProgressView()
+                                        .tint(.white)
+                                    Text("Iniciando transmisión en vivo...")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.80))
+                                }
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 200)
+                                .background(Color.black)
+                                .cornerRadius(20)
+                            }
 
                             // Cabecera flotante
                             HStack {
