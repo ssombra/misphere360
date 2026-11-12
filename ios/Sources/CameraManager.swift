@@ -591,16 +591,13 @@ public class CameraManager: ObservableObject {
     }
 
     public func startLiveView(completion: ((Bool) -> Void)? = nil) {
-        // Enviar comando 260 (STOP) previo para limpiar cualquier sesión o socket zombi en el chip Ambarella
-        sendCommand(msgId: 260, param: nil) { [weak self] _ in
-            self?.sendCommand(msgId: 259, param: "none_force") { resp in
-                let rval = resp["rval"] as? Int ?? -1
-                let ok = (rval == 0)
-                DispatchQueue.main.async {
-                    self?.isLiveViewActive = ok
-                    self?.liveViewStatus = ok ? "Transmisión RTSP activa (rtsp://192.168.42.1/live)" : "Error al iniciar RTSP (\(rval))"
-                    completion?(ok)
-                }
+        sendCommand(msgId: 259, param: "none_force") { [weak self] resp in
+            let rval = resp["rval"] as? Int ?? -1
+            let ok = (rval == 0)
+            DispatchQueue.main.async {
+                self?.isLiveViewActive = ok
+                self?.liveViewStatus = ok ? "Transmisión RTSP activa (rtsp://192.168.42.1/live)" : "Error al iniciar RTSP (\(rval))"
+                completion?(ok)
             }
         }
     }
