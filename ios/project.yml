@@ -4,6 +4,11 @@ options:
   deploymentTarget:
     iOS: "16.0"
 
+packages:
+  VLCKit:
+    url: https://github.com/rsalesas/VLCKit.git
+    from: 3.6.6
+
 targets:
   MiSphere360:
     type: application
@@ -11,6 +16,9 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+    dependencies:
+      - package: VLCKit
+        product: VLCKit
     settings:
       base:
         PRODUCT_NAME: "Mi Sphere 360"
