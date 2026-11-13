@@ -578,6 +578,10 @@ public class CameraManager: ObservableObject {
         }
     }
 
+    // NOTA TÉCNICA: La Xiaomi Mi Sphere 360 emite el flujo RTSP en rtsp://192.168.42.1/live de manera
+    // continua en segundo plano sin requerir comandos de activación. Enviar msgId 259 o 260 fuerza al chip
+    // Ambarella A12 a reiniciar el codificador de vídeo, lo cual congela o aborta cualquier sesión RTSP activa.
+    // Usar exclusivamente conexión directa por socket RTSP (puerto 554) con NativeRTSPPlayer.
     public func startLiveView(completion: ((Bool) -> Void)? = nil) {
         sendCommand(msgId: 259, param: "none_force") { [weak self] resp in
             let rval = resp["rval"] as? Int ?? -1
