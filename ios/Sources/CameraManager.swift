@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import Combine
+import UIKit
 
 /// Modelo de archivo en la tarjeta microSD de la cámara
 public struct SDFileItem: Identifiable, Hashable {
