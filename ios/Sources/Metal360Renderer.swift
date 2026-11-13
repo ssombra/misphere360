@@ -36,6 +36,7 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
     @Published public var pitch: Float = 0.0
     @Published public var fovDeg: Float = 85.0
     @Published public var isLutLoaded: Bool = false
+    @Published public var isExpanded: Bool = false
 
     private var device: MTLDevice?
     private var commandQueue: MTLCommandQueue?
@@ -265,7 +266,9 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
 
     // MARK: - MTKViewDelegate
 
-    public func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    public func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        view.setNeedsDisplay()
+    }
 
     public func draw(in view: MTKView) {
         guard let drawable = view.currentDrawable,

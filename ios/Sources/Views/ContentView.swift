@@ -20,6 +20,7 @@ struct ContentView: View {
     }
     @State private var viewfinderMode: ViewfinderMode = .off
     @ObservedObject private var rtspPlayer = NativeRTSPPlayer.shared
+    @ObservedObject private var renderer = Metal360Renderer.shared
 
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0) // #FF6700
     private let darkBg = Color(red: 0.05, green: 0.06, blue: 0.09)
@@ -36,13 +37,17 @@ struct ContentView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 10)
 
-                Spacer(minLength: 4)
+                if !(viewfinderMode == .live && renderer.isExpanded) {
+                    Spacer(minLength: 4)
+                }
 
                 // 2. Área Central (Estado de la Cámara y Parámetros Activos)
                 centralViewfinder
                     .padding(.horizontal, 16)
 
-                Spacer(minLength: 4)
+                if !(viewfinderMode == .live && renderer.isExpanded) {
+                    Spacer(minLength: 4)
+                }
 
                 // 3. Panel Completo de Ajustes de la Cámara
                 if camera.isConnected {
@@ -84,6 +89,7 @@ struct ContentView: View {
         .onChange(of: viewfinderMode) { mode in
             if mode != .live {
                 rtspPlayer.stopStream()
+                renderer.isExpanded = false
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
@@ -244,12 +250,15 @@ struct ContentView: View {
                 )
             } else {
                 // Zona Central: Visor en Vivo RTSP o Apagado (Off)
+                let isExpanded = (viewfinderMode == .live && renderer.isExpanded)
+
                 ZStack {
                     if viewfinderMode == .live {
                         ZStack(alignment: .topLeading) {
                             LiveViewPlayerView()
                                 .frame(maxWidth: .infinity)
-                                .frame(height: 200)
+                                .frame(height: isExpanded ? nil : 200)
+                                .frame(maxHeight: isExpanded ? .infinity : 200)
                                 .cornerRadius(20)
                                 .clipped()
 
@@ -309,7 +318,8 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 200)
+                .frame(height: isExpanded ? nil : 200)
+                .frame(maxHeight: isExpanded ? .infinity : 200)
                 .background(.ultraThinMaterial)
                 .background(Color.white.opacity(0.06))
                 .cornerRadius(20)

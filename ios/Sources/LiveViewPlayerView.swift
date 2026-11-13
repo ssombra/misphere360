@@ -69,48 +69,58 @@ public struct LiveViewPlayerView: View {
             if player.isPlaying {
                 VStack {
                     Spacer()
-                    HStack {
-                        // Selector de proyección
-                        HStack(spacing: 2) {
-                            ForEach(Metal360Renderer.DisplayMode.allCases) { m in
-                                Button {
-                                    let impact = UIImpactFeedbackGenerator(style: .light)
-                                    impact.impactOccurred()
-                                    renderer.mode = m
-                                } label: {
-                                    Text(m.title)
-                                        .font(.system(size: 9.5, weight: renderer.mode == m ? .bold : .medium))
-                                        .foregroundColor(renderer.mode == m ? .black : .white.opacity(0.75))
-                                        .padding(.horizontal, 7)
-                                        .padding(.vertical, 3)
-                                        .background(renderer.mode == m ? Color.white : Color.clear)
-                                        .clipShape(Capsule())
+                    HStack(alignment: .bottom) {
+                        if !renderer.isExpanded {
+                            // Selector de proyección (solo en modo compacto)
+                            HStack(spacing: 2) {
+                                ForEach(Metal360Renderer.DisplayMode.allCases) { m in
+                                    Button {
+                                        let impact = UIImpactFeedbackGenerator(style: .light)
+                                        impact.impactOccurred()
+                                        renderer.mode = m
+                                    } label: {
+                                        Text(m.title)
+                                            .font(.system(size: 9.5, weight: renderer.mode == m ? .bold : .medium))
+                                            .foregroundColor(renderer.mode == m ? .black : .white.opacity(0.75))
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(renderer.mode == m ? Color.white : Color.clear)
+                                            .clipShape(Capsule())
+                                    }
                                 }
                             }
+                            .padding(2)
+                            .background(.ultraThinMaterial)
+                            .background(Color.black.opacity(0.50))
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule().stroke(Color.white.opacity(0.20), lineWidth: 0.5)
+                            )
                         }
-                        .padding(2)
-                        .background(.ultraThinMaterial)
-                        .background(Color.black.opacity(0.50))
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule().stroke(Color.white.opacity(0.20), lineWidth: 0.5)
-                        )
 
                         Spacer()
 
-                        // Sugerencia de gesto
-                        if renderer.mode == .interactive360 {
-                            HStack(spacing: 4) {
-                                Image(systemName: "hand.draw")
-                                    .font(.system(size: 9))
-                                Text("Arrastra 360°")
-                                    .font(.system(size: 9.5, weight: .medium))
+                        // Botón de Expansión / Reducción del visor
+                        Button {
+                            let impact = UIImpactFeedbackGenerator(style: .medium)
+                            impact.impactOccurred()
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                renderer.isExpanded.toggle()
+                                if renderer.isExpanded {
+                                    renderer.mode = .interactive360
+                                }
                             }
-                            .foregroundColor(.white.opacity(0.75))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.black.opacity(0.45))
-                            .clipShape(Capsule())
+                        } label: {
+                            Image(systemName: renderer.isExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 28, height: 28)
+                                .background(.ultraThinMaterial)
+                                .background(Color.black.opacity(0.50))
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle().stroke(Color.white.opacity(0.20), lineWidth: 0.5)
+                                )
                         }
                     }
                     .padding(.horizontal, 10)
