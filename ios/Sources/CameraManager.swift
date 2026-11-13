@@ -653,30 +653,46 @@ public class CameraManager: ObservableObject {
         sendCommand(msgId: 5169, param: "\(Int(ev * 2.0))")
         sendCommand(msgId: 5168, param: "\(wb)")
 
-        // Enviar ÚNICAMENTE el sub-modo de foto activo a la cámara para no sobrescribir el registro sub_mode:
+        // Desactivar explícitamente los sub-modos inactivos con param: 0 y activar el seleccionado:
         if photoInterval > 0 {
+            sendCommand(msgId: 4866, param: "0")
+            sendCommand(msgId: 4918, param: "0")
             sendCommand(msgId: 4929, param: "\(photoInterval)")
         } else if photoBracketing > 0 {
+            sendCommand(msgId: 4866, param: "0")
+            sendCommand(msgId: 4929, param: "0")
             sendCommand(msgId: 4918, param: "\(photoBracketing)")
         } else if timer > 0 {
+            sendCommand(msgId: 4929, param: "0")
+            sendCommand(msgId: 4918, param: "0")
             sendCommand(msgId: 4866, param: "\(timer)")
         } else {
             sendCommand(msgId: 4866, param: "0")
+            sendCommand(msgId: 4929, param: "0")
+            sendCommand(msgId: 4918, param: "0")
         }
 
         sendCommand(msgId: 4612, param: "\(videoRes)")
         sendCommand(msgId: 5136, param: "\(videoWB)")
         sendCommand(msgId: 5137, param: "\(Int(videoEV * 2.0))")
 
-        // Enviar ÚNICAMENTE el sub-modo de video activo a la cámara:
+        // Desactivar explícitamente los sub-modos de video inactivos y activar el seleccionado:
         if videoShort > 0 {
+            sendCommand(msgId: 4621, param: "0")
+            sendCommand(msgId: 4916, param: "0")
             sendCommand(msgId: 4618, param: "\(videoShort)")
         } else if videoTimelapse > 0 {
+            sendCommand(msgId: 4618, param: "0")
+            sendCommand(msgId: 4916, param: "0")
             sendCommand(msgId: 4621, param: "\(videoTimelapse)")
         } else if videoSlowMo > 0 {
+            sendCommand(msgId: 4618, param: "0")
+            sendCommand(msgId: 4621, param: "0")
             sendCommand(msgId: 4916, param: "\(videoSlowMo)")
         } else {
             sendCommand(msgId: 4618, param: "0")
+            sendCommand(msgId: 4621, param: "0")
+            sendCommand(msgId: 4916, param: "0")
         }
 
         if videoLoop > 0 {
@@ -827,11 +843,13 @@ public class CameraManager: ObservableObject {
         UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         lastStatusMessage = "Enviando Timer (\(val)s) con msgId 4866..."
         if val > 0 {
-            // Firmware Ambarella: sub_mode es mutuamente excluyente. Al activar Timer, limpiar Intervalo y HDR.
+            // Desactivar explícitamente en la cámara los otros sub-modos (Intervalo y HDR)
             self.photoInterval = 0
             self.photoBracketing = 0
             UserDefaults.standard.set(0, forKey: "cam_photoInterval")
             UserDefaults.standard.set(0, forKey: "cam_photoBracketing")
+            sendCommand(msgId: 4929, param: "0")
+            sendCommand(msgId: 4918, param: "0")
             sendCommand(msgId: 4866, param: "\(val)")
         } else {
             sendCommand(msgId: 4866, param: "0")
@@ -850,11 +868,13 @@ public class CameraManager: ObservableObject {
         UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         lastStatusMessage = "Enviando Intervalo (\(val)s) con msgId 4929..."
         if val > 0 {
-            // Al activar Intervalómetro, limpiar Timer y HDR.
+            // Desactivar explícitamente en la cámara los otros sub-modos (Timer y HDR)
             self.timer = 0
             self.photoBracketing = 0
             UserDefaults.standard.set(0, forKey: "cam_timer")
             UserDefaults.standard.set(0, forKey: "cam_photoBracketing")
+            sendCommand(msgId: 4866, param: "0")
+            sendCommand(msgId: 4918, param: "0")
             sendCommand(msgId: 4929, param: "\(val)")
         } else {
             sendCommand(msgId: 4929, param: "0")
@@ -873,11 +893,13 @@ public class CameraManager: ObservableObject {
         UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         lastStatusMessage = "Enviando HDR (\(val)) con msgId 4918..."
         if val > 0 {
-            // Al activar HDR / Bracketing, limpiar Timer e Intervalo.
+            // Desactivar explícitamente en la cámara los otros sub-modos (Timer e Intervalo)
             self.timer = 0
             self.photoInterval = 0
             UserDefaults.standard.set(0, forKey: "cam_timer")
             UserDefaults.standard.set(0, forKey: "cam_photoInterval")
+            sendCommand(msgId: 4866, param: "0")
+            sendCommand(msgId: 4929, param: "0")
             sendCommand(msgId: 4918, param: "\(val)")
         } else {
             sendCommand(msgId: 4918, param: "0")
@@ -918,6 +940,8 @@ public class CameraManager: ObservableObject {
             self.videoSlowMo = 0
             UserDefaults.standard.set(0, forKey: "cam_videoTimelapse")
             UserDefaults.standard.set(0, forKey: "cam_videoSlowMo")
+            sendCommand(msgId: 4621, param: "0")
+            sendCommand(msgId: 4916, param: "0")
             sendCommand(msgId: 4618, param: "\(val)")
         } else {
             sendCommand(msgId: 4618, param: "0")
@@ -936,6 +960,8 @@ public class CameraManager: ObservableObject {
             self.videoSlowMo = 0
             UserDefaults.standard.set(0, forKey: "cam_videoShort")
             UserDefaults.standard.set(0, forKey: "cam_videoSlowMo")
+            sendCommand(msgId: 4618, param: "0")
+            sendCommand(msgId: 4916, param: "0")
             sendCommand(msgId: 4621, param: "\(val)")
         } else {
             sendCommand(msgId: 4621, param: "0")
@@ -954,6 +980,8 @@ public class CameraManager: ObservableObject {
             self.videoTimelapse = 0
             UserDefaults.standard.set(0, forKey: "cam_videoShort")
             UserDefaults.standard.set(0, forKey: "cam_videoTimelapse")
+            sendCommand(msgId: 4618, param: "0")
+            sendCommand(msgId: 4621, param: "0")
             sendCommand(msgId: 4916, param: "\(val)")
         } else {
             sendCommand(msgId: 4916, param: "0")
