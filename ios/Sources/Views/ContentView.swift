@@ -20,6 +20,7 @@ struct ContentView: View {
         case live = "En Vivo"
     }
     @State private var viewfinderMode: ViewfinderMode = .off
+    @AppStorage("liveViewBufferMs") private var liveViewBufferMs: Int = 500
 
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0) // #FF6700
     private let darkBg = Color(red: 0.05, green: 0.06, blue: 0.09)
@@ -247,14 +248,46 @@ struct ContentView: View {
                         }
                     } else if viewfinderMode == .live {
                         ZStack(alignment: .topLeading) {
-                            LiveViewPlayerView()
+                            LiveViewPlayerView(cachingMs: liveViewBufferMs)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 200)
 
                             // Cabecera flotante
                             HStack {
                                 modeSwitchPill
+
                                 Spacer()
+
+                                // Selector dinámico de búfer para pruebas
+                                Menu {
+                                    Button("250 ms (Ultra-baja latencia)") {
+                                        liveViewBufferMs = 250
+                                    }
+                                    Button("500 ms (Equilibrado)") {
+                                        liveViewBufferMs = 500
+                                    }
+                                    Button("1.000 ms (Máxima estabilidad)") {
+                                        liveViewBufferMs = 1000
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "gauge.with.needle")
+                                            .font(.system(size: 10, weight: .semibold))
+                                        Text("\(liveViewBufferMs) ms")
+                                            .font(.system(size: 11, weight: .bold))
+                                        Image(systemName: "chevron.up.chevron.down")
+                                            .font(.system(size: 8, weight: .bold))
+                                    }
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(.ultraThinMaterial)
+                                    .background(Color.black.opacity(0.40))
+                                    .clipShape(Capsule())
+                                    .overlay(
+                                        Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                                    )
+                                }
                             }
                             .padding(10)
 

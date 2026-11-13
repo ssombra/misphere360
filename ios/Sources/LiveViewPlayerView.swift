@@ -7,9 +7,11 @@ import MobileVLCKit
 
 public struct LiveViewPlayerView: View {
     public let streamURL: URL
+    public let cachingMs: Int
 
-    public init(url: URL = URL(string: "rtsp://192.168.42.1/live")!) {
+    public init(url: URL = URL(string: "rtsp://192.168.42.1/live")!, cachingMs: Int = 500) {
         self.streamURL = url
+        self.cachingMs = cachingMs
     }
 
     public var body: some View {
@@ -17,7 +19,7 @@ public struct LiveViewPlayerView: View {
             Color.black
 
             #if canImport(VLCKit) || canImport(MobileVLCKit)
-            VLCPlayerRepresentable(url: streamURL)
+            VLCPlayerRepresentable(url: streamURL, cachingMs: cachingMs)
             #else
             VStack(spacing: 8) {
                 Image(systemName: "video.fill")
@@ -35,13 +37,17 @@ public struct LiveViewPlayerView: View {
 #if canImport(VLCKit) || canImport(MobileVLCKit)
 struct VLCPlayerRepresentable: UIViewControllerRepresentable {
     let url: URL
+    let cachingMs: Int
 
     func makeUIViewController(context: Context) -> VLCStreamViewController {
-        VLCStreamViewController(url: url)
+        VLCStreamViewController(url: url, cachingMs: cachingMs)
     }
 
     func updateUIViewController(_ uiViewController: VLCStreamViewController, context: Context) {
-        // Cuerpo vacío: evita reinicios del reproductor provocados por refrescos de SwiftUI
+        if uiViewController.cachingMs != cachingMs {
+            print("[VLC] Actualizando búfer de red en caliente a \(cachingMs) ms")
+            uiViewController.updateCachingAndReload(cachingMs)
+        }
     }
 
     static func dismantleUIViewController(_ uiViewController: VLCStreamViewController, coordinator: ()) {
@@ -51,11 +57,13 @@ struct VLCPlayerRepresentable: UIViewControllerRepresentable {
 
 final class VLCStreamViewController: UIViewController {
     let streamURL: URL
+    var cachingMs: Int
     private var player: VLCMediaPlayer?
     private var videoSurfaceView: UIView!
 
-    init(url: URL) {
+    init(url: URL, cachingMs: Int = 500) {
         self.streamURL = url
+        self.cachingMs = cachingMs
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -90,13 +98,19 @@ final class VLCStreamViewController: UIViewController {
         let media = VLCMedia(url: streamURL)
         media.addOptions([
             "rtsp-tcp": true,
-            "network-caching": 200,
+            "network-caching": cachingMs,
             "drop-late-frames": true,
             "skip-frames": true,
             "avcodec-hw": "any"
         ])
         p.media = media
         self.player = p
+    }
+
+    func updateCachingAndReload(_ newMs: Int) {
+        self.cachingMs = newMs
+        setupPlayer()
+        player?.play()
     }
 
     override func viewDidAppear(_ animated: Bool) {
