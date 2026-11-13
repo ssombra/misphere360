@@ -2,7 +2,7 @@ name: Compilar Mi Sphere 360 para iOS
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, "feature/**" ]
   workflow_dispatch: # Permite compilar manualmente con un clic en GitHub
 
 jobs:
