@@ -25,6 +25,17 @@ public final class NativeRTSPPlayer: ObservableObject {
     private var sessionId: String? = nil
     private var keepaliveTimer: DispatchSourceTimer?
 
+    // Máquina de estados explícita para evitar peticiones duplicadas o fuera de orden
+    private enum RTSPState {
+        case disconnected
+        case waitingOptions
+        case waitingDescribe
+        case waitingSetup
+        case waitingPlay
+        case streaming
+    }
+    private var state: RTSPState = .disconnected
+
     // Búferes de red y protocolo
     private var tcpBuffer = Data()
 
@@ -68,7 +79,7 @@ public final class NativeRTSPPlayer: ObservableObject {
                 self.targetDisplayLayer = layer
             }
 
-            // Si ya está reproduciendo hacia la misma capa, no reiniciar
+            // Si ya está en proceso de conexión o reproduciendo, no reiniciar
             if self.isPlaying || self.isConnecting {
                 return
             }
@@ -97,7 +108,7 @@ public final class NativeRTSPPlayer: ObservableObject {
             self.stopKeepalive()
 
             if let sid = self.sessionId {
-                let teardown = "TEARDOWN \(self.streamURL) RTSP/1.0\r\nCSeq: \(self.cseq)\r\nSession: \(sid)\r\nUser-Agent: MiSphere360\r\n\r\n"
+                let teardown = "TEARDOWN \(self.streamURL) RTSP/1.0\r\nCSeq: \(self.cseq)\r\nSession: \(sid)\r\nUser-Agent: MiSphere360/1.0\r\n\r\n"
                 self.sendRTSP(teardown)
             }
 
@@ -117,6 +128,7 @@ public final class NativeRTSPPlayer: ObservableObject {
     }
 
     private func resetState() {
+        state = .disconnected
         cseq = 1
         sessionId = nil
         tcpBuffer.removeAll(keepingCapacity: true)
@@ -148,22 +160,20 @@ public final class NativeRTSPPlayer: ObservableObject {
         tcpOpts.keepaliveIdle = 10
 
         let params = NWParameters(tls: nil, tcp: tcpOpts)
-        params.preferNoProxies = true
-        params.prohibitedInterfaceTypes = [.cellular] // Garantizar Wi-Fi
 
         let conn = NWConnection(host: endpoint, port: port, using: params)
         self.connection = conn
 
-        conn.stateUpdateHandler = { [weak self] state in
+        conn.stateUpdateHandler = { [weak self] netState in
             guard let self = self else { return }
-            switch state {
+            switch netState {
             case .ready:
                 print("[NativeRTSP] Socket TCP conectado a \(host):554. Enviando OPTIONS...")
                 self.sendOptions()
                 self.receiveNext()
             case .failed(let err):
                 print("[NativeRTSP] Error de conexión TCP: \(err)")
-                self.showError("No se pudo conectar a la cámara (puerto 554).")
+                self.showError("No se pudo conectar al puerto 554 de la cámara.")
             case .waiting(let err):
                 print("[NativeRTSP] Conexión en espera: \(err)")
             default:
@@ -174,7 +184,7 @@ public final class NativeRTSPPlayer: ObservableObject {
         conn.start(queue: queue)
     }
 
-    // MARK: - Protocolo RTSP (Handshake)
+    // MARK: - Protocolo RTSP (Máquina de Estados)
 
     private func sendRTSP(_ str: String) {
         guard let data = str.data(using: .utf8), let conn = connection else { return }
@@ -186,31 +196,35 @@ public final class NativeRTSPPlayer: ObservableObject {
     }
 
     private func sendOptions() {
+        state = .waitingOptions
         let req = "OPTIONS \(streamURL) RTSP/1.0\r\nCSeq: \(cseq)\r\nUser-Agent: MiSphere360/1.0\r\n\r\n"
         cseq += 1
         sendRTSP(req)
     }
 
     private func sendDescribe() {
+        state = .waitingDescribe
         let req = "DESCRIBE \(streamURL) RTSP/1.0\r\nCSeq: \(cseq)\r\nAccept: application/sdp\r\nUser-Agent: MiSphere360/1.0\r\n\r\n"
         cseq += 1
         sendRTSP(req)
     }
 
     private func sendSetup(trackPath: String) {
+        state = .waitingSetup
         let req = "SETUP \(trackPath) RTSP/1.0\r\nCSeq: \(cseq)\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nUser-Agent: MiSphere360/1.0\r\n\r\n"
         cseq += 1
         sendRTSP(req)
     }
 
     private func sendPlay() {
-        guard let sid = sessionId else { return }
+        guard let sid = sessionId else {
+            showError("No se obtuvo Session ID en el SETUP RTSP.")
+            return
+        }
+        state = .waitingPlay
         let req = "PLAY \(streamURL) RTSP/1.0\r\nCSeq: \(cseq)\r\nSession: \(sid)\r\nRange: npt=0.000-\r\nUser-Agent: MiSphere360/1.0\r\n\r\n"
         cseq += 1
         sendRTSP(req)
-
-        print("[NativeRTSP] PLAY enviado. Esperando flujo de vídeo intercalado...")
-        startKeepalive()
     }
 
     private func startKeepalive() {
@@ -218,7 +232,7 @@ public final class NativeRTSPPlayer: ObservableObject {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 20, repeating: 20)
         timer.setEventHandler { [weak self] in
-            guard let self = self, let sid = self.sessionId else { return }
+            guard let self = self, let sid = self.sessionId, self.state == .streaming else { return }
             let keepalive = "OPTIONS \(self.streamURL) RTSP/1.0\r\nCSeq: \(self.cseq)\r\nSession: \(sid)\r\nUser-Agent: MiSphere360/1.0\r\n\r\n"
             self.cseq += 1
             self.sendRTSP(keepalive)
@@ -244,7 +258,7 @@ public final class NativeRTSPPlayer: ObservableObject {
             }
 
             if isComplete {
-                print("[NativeRTSP] Conexión cerrada por el servidor.")
+                print("[NativeRTSP] Conexión cerrada por la cámara (isComplete).")
                 self.showError("Conexión finalizada por la cámara.")
                 return
             }
@@ -263,7 +277,7 @@ public final class NativeRTSPPlayer: ObservableObject {
 
     private func processTCPBuffer() {
         while !tcpBuffer.isEmpty {
-            // Verificar si el siguiente mensaje es un paquete RTP intercalado ($ = 0x24)
+            // Caso 1: Paquete RTP intercalado ($ = 0x24)
             if tcpBuffer[0] == 0x24 {
                 guard tcpBuffer.count >= 4 else { return }
 
@@ -272,7 +286,7 @@ public final class NativeRTSPPlayer: ObservableObject {
                 let totalLen = 4 + packetLen
 
                 guard tcpBuffer.count >= totalLen else {
-                    // Paquete incompleto: esperar siguientes bytes de TCP
+                    // Paquete incompleto: esperar siguientes bytes TCP
                     return
                 }
 
@@ -285,9 +299,9 @@ public final class NativeRTSPPlayer: ObservableObject {
                 }
                 // Canal 1 = RTCP (ignorar)
             } else {
-                // Mensaje de texto RTSP (ej. "RTSP/1.0 200 OK...")
+                // Caso 2: Mensaje de respuesta RTSP en texto (ej. "RTSP/1.0 200 OK...")
                 guard let crlfcrlf = tcpBuffer.range(of: Data("\r\n\r\n".utf8)) else {
-                    // Si no contiene \r\n\r\n y no comienza con $, descartar bytes de ruido si los hay
+                    // Descartar bytes corruptos hasta el próximo '$' o 'RTSP'
                     if !tcpBuffer.starts(with: [0x24]) && !tcpBuffer.starts(with: "RTSP".utf8) {
                         if let nextMarker = tcpBuffer.firstIndex(of: 0x24) {
                             tcpBuffer.removeSubrange(0..<nextMarker)
@@ -320,21 +334,30 @@ public final class NativeRTSPPlayer: ObservableObject {
                         }
                         let bodyData = tcpBuffer.subdata(in: skipLen..<skipLen + contentLength)
                         skipLen += contentLength
+                        tcpBuffer.removeSubrange(0..<skipLen)
                         handleRTSPResponse(headerText: headerText, body: bodyData)
                     } else {
+                        tcpBuffer.removeSubrange(0..<skipLen)
                         handleRTSPResponse(headerText: headerText, body: nil)
                     }
+                } else {
+                    tcpBuffer.removeSubrange(0..<skipLen)
                 }
-
-                tcpBuffer.removeSubrange(0..<skipLen)
             }
         }
     }
 
     private func handleRTSPResponse(headerText: String, body: Data?) {
         let lines = headerText.components(separatedBy: "\r\n")
-        guard let first = lines.first, first.contains("200 OK") else {
-            print("[NativeRTSP] Respuesta RTSP no 200: \(headerText)")
+        guard let first = lines.first else { return }
+
+        // Extraer código de estado HTTP/RTSP
+        let parts = first.components(separatedBy: " ")
+        let statusCode = parts.count >= 2 ? (Int(parts[1]) ?? 0) : 0
+
+        guard statusCode == 200 else {
+            print("[NativeRTSP] Error de servidor RTSP (\(state)): \(first)")
+            showError("Cámara respondió: \(first)")
             return
         }
 
@@ -349,50 +372,92 @@ public final class NativeRTSPPlayer: ObservableObject {
             }
         }
 
-        // Si responde a OPTIONS (primera petición), enviar DESCRIBE
-        if headerText.contains("Public:") || cseq <= 2 {
+        switch state {
+        case .waitingOptions:
+            print("[NativeRTSP] OPTIONS 200 OK. Solicitando DESCRIBE...")
             sendDescribe()
-            return
+
+        case .waitingDescribe:
+            print("[NativeRTSP] DESCRIBE 200 OK. Procesando SDP...")
+            var sdpString = ""
+            if let b = body, let str = String(data: b, encoding: .utf8) {
+                sdpString = str
+            }
+            // Parsear SPS y PPS desde sprop-parameter-sets en el SDP
+            parseSDP(sdpString)
+
+            // Extraer control track de la sección m=video
+            let trackURL = extractVideoTrackURL(from: sdpString, baseURL: streamURL)
+            print("[NativeRTSP] Pista de vídeo: \(trackURL). Solicitando SETUP...")
+            sendSetup(trackPath: trackURL)
+
+        case .waitingSetup:
+            print("[NativeRTSP] SETUP 200 OK (Session: \(sessionId ?? "none")). Solicitando PLAY...")
+            sendPlay()
+
+        case .waitingPlay:
+            print("[NativeRTSP] PLAY 200 OK. Flujo RTSP activo!")
+            state = .streaming
+            startKeepalive()
+
+        case .streaming:
+            // Respuesta de keepalive periódico u otra petición durante streaming; nada que hacer
+            break
+
+        default:
+            break
         }
+    }
 
-        // Si responde a DESCRIBE, procesar SDP e iniciar SETUP
-        if let body = body, let sdp = String(data: body, encoding: .utf8) {
-            parseSDP(sdp)
+    private func extractVideoTrackURL(from sdp: String, baseURL: String) -> String {
+        let lines = sdp.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+        var inVideoSection = false
+        var trackControl: String? = nil
 
-            var targetTrack = "\(streamURL)/track1"
-            if let range = sdp.range(of: "control:") {
-                let sub = sdp[range.upperBound...]
-                let controlLine = sub.components(separatedBy: "\r\n").first?.trimmingCharacters(in: .whitespaces) ?? ""
-                if !controlLine.isEmpty {
-                    if controlLine.hasPrefix("rtsp://") {
-                        targetTrack = controlLine
-                    } else if controlLine == "*" {
-                        targetTrack = streamURL
-                    } else {
-                        targetTrack = "\(streamURL)/\(controlLine)"
-                    }
+        for line in lines {
+            if line.hasPrefix("m=video") {
+                inVideoSection = true
+                continue
+            }
+            if inVideoSection && line.hasPrefix("m=") {
+                break
+            }
+            if inVideoSection && line.hasPrefix("a=control:") {
+                let ctrl = String(line.dropFirst("a=control:".count)).trimmingCharacters(in: .whitespaces)
+                if !ctrl.isEmpty && ctrl != "*" {
+                    trackControl = ctrl
+                    break
                 }
             }
-            sendSetup(trackPath: targetTrack)
-            return
         }
 
-        // Si responde a SETUP, enviar PLAY
-        if headerText.contains("Transport:") || self.sessionId != nil {
-            if !isPlaying {
-                sendPlay()
+        guard let ctrl = trackControl else {
+            print("[NativeRTSP] a=control no hallado en m=video, usando track1 por defecto.")
+            return "\(baseURL)/track1"
+        }
+
+        if ctrl.hasPrefix("rtsp://") {
+            return ctrl
+        }
+        if ctrl.hasPrefix("/") {
+            if let host = URL(string: baseURL)?.host {
+                return "rtsp://\(host)\(ctrl)"
             }
         }
+        let cleanBase = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        return "\(cleanBase)/\(ctrl)"
     }
 
     private func parseSDP(_ sdp: String) {
         // Extraer parámetros SPS y PPS (sprop-parameter-sets)
         if let range = sdp.range(of: "sprop-parameter-sets=") {
             let sub = sdp[range.upperBound...]
-            let line = sub.components(separatedBy: "\r\n").first?.components(separatedBy: ";").first ?? ""
+            let line = sub.components(separatedBy: .newlines).first?.components(separatedBy: ";").first ?? ""
             let parts = line.components(separatedBy: ",")
             if parts.count >= 2 {
-                if let s = Data(base64Encoded: parts[0]), let p = Data(base64Encoded: parts[1]) {
+                if let s = Data(base64Encoded: parts[0].trimmingCharacters(in: .whitespaces)),
+                   let p = Data(base64Encoded: parts[1].trimmingCharacters(in: .whitespaces)) {
+                    print("[NativeRTSP] SPS (\(s.count) bytes) y PPS (\(p.count) bytes) obtenidos del SDP.")
                     self.spsData = s
                     self.ppsData = p
                     createFormatDescription()
@@ -493,7 +558,6 @@ public final class NativeRTSPPlayer: ObservableObject {
             createFormatDescription()
             return
         } else if nalType == 6 || nalType == 9 { // SEI o Delimitador de Acceso
-            // Podemos omitirlos para máxima eficiencia
             return
         }
 
@@ -678,12 +742,12 @@ public final class NativeRTSPPlayer: ObservableObject {
     private func startWatchdog() {
         stopWatchdog()
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 3.0, repeating: 2.0)
+        timer.schedule(deadline: .now() + 5.0, repeating: 3.0)
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
             let now = CACurrentMediaTime()
-            if self.isPlaying && (now - self.lastFrameReceivedTime > 4.0) {
-                print("[NativeRTSP] Watchdog: Flujo detenido durante más de 4s. Reconectando...")
+            if self.state == .streaming && self.isPlaying && (now - self.lastFrameReceivedTime > 5.0) {
+                print("[NativeRTSP] Watchdog: Flujo detenido durante más de 5s. Reconectando...")
                 self.resetState()
                 self.connectSocket()
             }
