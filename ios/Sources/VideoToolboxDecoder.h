@@ -14,7 +14,7 @@ typedef void (^VideoToolboxDecoderFrameHandler)(CVPixelBufferRef pixelBuffer);
 @property (nonatomic, copy, nullable) VideoToolboxDecoderFrameHandler onFrame;
 
 - (nullable instancetype)initWithFormatDescription:(CMVideoFormatDescriptionRef)formatDescription;
-- (BOOL)decodeSampleBuffer:(CMSampleBufferRef)sampleBuffer;
+- (BOOL)decode:(CMSampleBufferRef)sampleBuffer;
 - (void)invalidate;
 
 @end

@@ -58,7 +58,7 @@ static void decompressionOutputCallback(
     return self;
 }
 
-- (BOOL)decodeSampleBuffer:(CMSampleBufferRef)sampleBuffer {
+- (BOOL)decode:(CMSampleBufferRef)sampleBuffer {
     if (!_decompressionSession) return NO;
 
     VTDecodeInfoFlags flagsOut = 0;

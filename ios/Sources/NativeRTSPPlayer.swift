@@ -726,7 +726,7 @@ public final class NativeRTSPPlayer: ObservableObject {
 
         // Decodificación por hardware VideoToolbox para renderizado Metal 360 cosido en tiempo real
         if let dec = self.decoder {
-            _ = dec.decodeSampleBuffer(sb)
+            _ = dec.decode(sb)
         }
 
         // Registrar métrica de cuadros y hora del último cuadro
