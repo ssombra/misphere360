@@ -89,7 +89,11 @@ final class VLCStreamViewController: UIViewController {
 
         let media = VLCMedia(url: streamURL)
         media.addOptions([
-            "rtsp-tcp": true
+            "rtsp-tcp": true,
+            "network-caching": 200,
+            "drop-late-frames": true,
+            "skip-frames": true,
+            "avcodec-hw": "any"
         ])
         p.media = media
         self.player = p
