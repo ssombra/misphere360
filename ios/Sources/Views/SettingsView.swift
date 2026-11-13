@@ -4,9 +4,6 @@ struct SettingsView: View {
     @ObservedObject var camera = CameraManager.shared
     @Environment(\.dismiss) var dismiss
 
-    @State private var autoOffMinutes = 10
-    @State private var buzzerLevel = 4
-    @State private var ledEnabled = true
     @State private var showCacheAlert = false
     @State private var showWiFiPassword = false
     @State private var showEditWiFiSheet = false
@@ -20,13 +17,13 @@ struct SettingsView: View {
         NavigationView {
             Form {
                 Section(header: Text("Gestión de Energía")) {
-                    Picker("Apagado Automático", selection: $autoOffMinutes) {
+                    Picker("Apagado Automático", selection: Binding(
+                        get: { camera.autoOffMinutes },
+                        set: { camera.setAutoTurnOff($0) }
+                    )) {
                         Text("Desactivado").tag(0)
                         Text("5 minutos").tag(5)
                         Text("10 minutos").tag(10)
-                    }
-                    .onChange(of: autoOffMinutes) { val in
-                        camera.sendCommand(msgId: 6151, param: val)
                     }
 
                     Button(role: .destructive) {
@@ -62,20 +59,20 @@ struct SettingsView: View {
                 }
 
                 Section(header: Text("Sonido y Luces")) {
-                    Picker("Volumen del Buzzer", selection: $buzzerLevel) {
+                    Picker("Volumen del Buzzer", selection: Binding(
+                        get: { camera.buzzerLevel },
+                        set: { camera.setBuzzer($0) }
+                    )) {
                         Text("Silencio").tag(0)
                         Text("Bajo").tag(1)
                         Text("Medio").tag(2)
                         Text("Alto").tag(4)
                     }
-                    .onChange(of: buzzerLevel) { val in
-                        camera.sendCommand(msgId: 6145, param: val)
-                    }
 
-                    Toggle("Luces LED de Estado", isOn: $ledEnabled)
-                        .onChange(of: ledEnabled) { val in
-                            camera.sendCommand(msgId: 6156, param: val ? 1 : 0)
-                        }
+                    Toggle("Luces LED de Estado", isOn: Binding(
+                        get: { camera.ledEnabled },
+                        set: { camera.setLED($0) }
+                    ))
                 }
 
                 Section(header: Text("Conectividad Wi-Fi de la Cámara")) {

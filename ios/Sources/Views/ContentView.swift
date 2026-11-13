@@ -665,10 +665,12 @@ struct ContentView: View {
                 if camera.currentMode == 1 {
                     location.forceSyncGPSWithCamera()
                     camera.takePhoto()
-                    // Esperar a que la cámara guarde el archivo en la microSD para actualizar el visor 360
-                    let delay: Double = camera.timer > 0 ? Double(camera.timer) + 2.5 : 2.5
-                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                        loadLatestPhoto(force: true)
+                    // Si no es un intervalómetro ni hay cuenta regresiva pendiente, programar recarga
+                    if !camera.isIntervalRunning && camera.countdownRemaining == 0 {
+                        let delay: Double = camera.timer > 0 ? Double(camera.timer) + 2.5 : 2.5
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                            loadLatestPhoto(force: true)
+                        }
                     }
                 } else {
                     camera.toggleVideoRecording()
@@ -680,10 +682,25 @@ struct ContentView: View {
                         .frame(width: 76, height: 76)
 
                     if camera.currentMode == 1 {
-                        // Foto: Círculo blanco puro sólido
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: 62, height: 62)
+                        if camera.countdownRemaining > 0 {
+                            // Cuenta atrás activa: fondo blanco con segundos
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 62, height: 62)
+                            Text("\(camera.countdownRemaining)")
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .foregroundColor(.black)
+                        } else if camera.isIntervalRunning {
+                            // Intervalómetro corriendo: botón cuadrado Stop (naranja)
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.orange)
+                                .frame(width: 32, height: 32)
+                        } else {
+                            // Foto: Círculo blanco puro sólido
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 62, height: 62)
+                        }
                     } else {
                         // Video: Círculo o cuadrado rojo de grabación estándar
                         if camera.isRecording {
