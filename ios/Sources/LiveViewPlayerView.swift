@@ -29,6 +29,7 @@ public struct LiveViewPlayerView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black.opacity(0.70))
+                .allowsHitTesting(false)
             }
 
             // Mensaje de error con botón de reintento
@@ -135,10 +136,13 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
         mtkView.delegate = Metal360Renderer.shared
         mtkView.framebufferOnly = true
         mtkView.colorPixelFormat = .bgra8Unorm
+        mtkView.contentScaleFactor = min(UIScreen.main.scale, 2.0)
         mtkView.preferredFramesPerSecond = 60
-        mtkView.isPaused = false
-        mtkView.enableSetNeedsDisplay = false
+        mtkView.isPaused = true
+        mtkView.enableSetNeedsDisplay = true
         mtkView.backgroundColor = .black
+
+        Metal360Renderer.shared.mtkView = mtkView
 
         // Gesto de arrastre para explorar en 360°
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))

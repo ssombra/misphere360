@@ -23,7 +23,15 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         }
     }
 
-    @Published public var mode: DisplayMode = .interactive360
+    public weak var mtkView: MTKView?
+
+    @Published public var mode: DisplayMode = .interactive360 {
+        didSet {
+            DispatchQueue.main.async { [weak self] in
+                self?.mtkView?.setNeedsDisplay()
+            }
+        }
+    }
     @Published public var yaw: Float = 0.0
     @Published public var pitch: Float = 0.0
     @Published public var fovDeg: Float = 85.0
@@ -40,8 +48,9 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
     private var lut2Texture: MTLTexture?
     private var weightTexture: MTLTexture?
 
-    // Textura actual del cuadro de vídeo
-    private var currentVideoTexture: MTLTexture?
+    // Texturas de vídeo NV12 actuales (Y = luminancia, UV = crominancia)
+    private var currentYTexture: MTLTexture?
+    private var currentUVTexture: MTLTexture?
     private let textureLock = NSLock()
 
     private struct Uniforms {
@@ -190,23 +199,47 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
 
-        var cvTextureOut: CVMetalTexture?
-        let result = CVMetalTextureCacheCreateTextureFromImage(
+        var yTextureOut: CVMetalTexture?
+        let yStatus = CVMetalTextureCacheCreateTextureFromImage(
             kCFAllocatorDefault,
             cache,
             pixelBuffer,
             nil,
-            .bgra8Unorm,
+            .r8Unorm,
             width,
             height,
             0,
-            &cvTextureOut
+            &yTextureOut
         )
 
-        if result == kCVReturnSuccess, let cvTex = cvTextureOut, let metalTex = CVMetalTextureGetTexture(cvTex) {
+        var uvTextureOut: CVMetalTexture?
+        let uvStatus = CVMetalTextureCacheCreateTextureFromImage(
+            kCFAllocatorDefault,
+            cache,
+            pixelBuffer,
+            nil,
+            .rg8Unorm,
+            width / 2,
+            height / 2,
+            1,
+            &uvTextureOut
+        )
+
+        if yStatus == kCVReturnSuccess, uvStatus == kCVReturnSuccess,
+           let yCv = yTextureOut, let uvCv = uvTextureOut,
+           let yMetal = CVMetalTextureGetTexture(yCv),
+           let uvMetal = CVMetalTextureGetTexture(uvCv) {
+
             textureLock.lock()
-            self.currentVideoTexture = metalTex
+            self.currentYTexture = yMetal
+            self.currentUVTexture = uvMetal
             textureLock.unlock()
+
+            CVMetalTextureCacheFlush(cache, 0)
+
+            DispatchQueue.main.async { [weak self] in
+                self?.mtkView?.setNeedsDisplay()
+            }
         }
     }
 
@@ -216,12 +249,18 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         let sensitivity: Float = 0.005
         yaw -= Float(deltaX) * sensitivity
         pitch = max(-1.4, min(1.4, pitch + Float(deltaY) * sensitivity))
+        DispatchQueue.main.async { [weak self] in
+            self?.mtkView?.setNeedsDisplay()
+        }
     }
 
     public func resetOrientation() {
         yaw = 0.0
         pitch = 0.0
         fovDeg = 85.0
+        DispatchQueue.main.async { [weak self] in
+            self?.mtkView?.setNeedsDisplay()
+        }
     }
 
     // MARK: - MTKViewDelegate
@@ -238,10 +277,12 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         }
 
         textureLock.lock()
-        let videoTex = self.currentVideoTexture
+        let yTex = self.currentYTexture
+        let uvTex = self.currentUVTexture
         textureLock.unlock()
 
-        guard let video = videoTex,
+        guard let y = yTex,
+              let uv = uvTex,
               let lut1 = self.lut1Texture,
               let lut2 = self.lut2Texture,
               let weight = self.weightTexture else {
@@ -271,11 +312,12 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
 
-        // Asignar Texturas
-        encoder.setFragmentTexture(video, index: 0)
-        encoder.setFragmentTexture(lut1, index: 1)
-        encoder.setFragmentTexture(lut2, index: 2)
-        encoder.setFragmentTexture(weight, index: 3)
+        // Asignar Texturas: NV12 (Y en 0, UV en 1) y Tablas Ópticas (LUT1 en 2, LUT2 en 3, Weight en 4)
+        encoder.setFragmentTexture(y, index: 0)
+        encoder.setFragmentTexture(uv, index: 1)
+        encoder.setFragmentTexture(lut1, index: 2)
+        encoder.setFragmentTexture(lut2, index: 3)
+        encoder.setFragmentTexture(weight, index: 4)
         encoder.setFragmentSamplerState(sampler, index: 0)
 
         // Dibujar pantalla completa (2 triángulos = 6 vértices)

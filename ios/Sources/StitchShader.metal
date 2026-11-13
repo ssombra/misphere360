@@ -14,6 +14,23 @@ struct Uniforms {
     float aspect;       // Relación de aspecto (ancho / alto)
 };
 
+// Conversión ultra-rápida por hardware YUV (NV12 BT.601 Video Range) a RGB
+inline float4 sampleYUV(texture2d<float> yTex, texture2d<float> uvTex, sampler s, float2 uv) {
+    float y = yTex.sample(s, uv).r;
+    float2 uvVal = uvTex.sample(s, uv).rg;
+
+    // Fórmula estándar BT.601 Video Range
+    float y_adj = (y - (16.0 / 255.0)) * 1.16438356;
+    float u_adj = uvVal.x - (128.0 / 255.0);
+    float v_adj = uvVal.y - (128.0 / 255.0);
+
+    float r = y_adj + 1.59602678 * v_adj;
+    float g = y_adj - 0.39176229 * u_adj - 0.81296764 * v_adj;
+    float b = y_adj + 2.01723214 * u_adj;
+
+    return float4(clamp(float3(r, g, b), 0.0, 1.0), 1.0);
+}
+
 // Vértice que cubre toda la pantalla usando 2 triángulos (6 vértices)
 vertex VertexOut stitchVertexShader(uint vertexID [[vertex_id]]) {
     const float2 positions[6] = {
@@ -34,16 +51,17 @@ vertex VertexOut stitchVertexShader(uint vertexID [[vertex_id]]) {
 fragment float4 stitchFragmentShader(
     VertexOut in [[stage_in]],
     constant Uniforms &u [[buffer(0)]],
-    texture2d<float> videoTex [[texture(0)]],
-    texture2d<float> lut1Tex [[texture(1)]],
-    texture2d<float> lut2Tex [[texture(2)]],
-    texture2d<float> weightTex [[texture(3)]],
+    texture2d<float> yTex [[texture(0)]],
+    texture2d<float> uvTex [[texture(1)]],
+    texture2d<float> lut1Tex [[texture(2)]],
+    texture2d<float> lut2Tex [[texture(3)]],
+    texture2d<float> weightTex [[texture(4)]],
     sampler s [[sampler(0)]]
 ) {
     // Modo 2: Dual Fisheye crudo (las 2 circunferencias originales)
     if (u.mode == 2) {
         float2 uv = float2(in.ndc.x * 0.5 + 0.5, 0.5 - in.ndc.y * 0.5);
-        return videoTex.sample(s, uv);
+        return sampleYUV(yTex, uvTex, s, uv);
     }
 
     float2 eqUV;
@@ -81,11 +99,11 @@ fragment float4 stitchFragmentShader(
 
     if (w1 > 0.001) {
         float2 uv1 = lut1Tex.sample(s, eqUV).rg;
-        col1 = videoTex.sample(s, uv1);
+        col1 = sampleYUV(yTex, uvTex, s, uv1);
     }
     if (w1 < 0.999) {
         float2 uv2 = lut2Tex.sample(s, eqUV).rg;
-        col2 = videoTex.sample(s, uv2);
+        col2 = sampleYUV(yTex, uvTex, s, uv2);
     }
 
     return mix(col2, col1, w1);

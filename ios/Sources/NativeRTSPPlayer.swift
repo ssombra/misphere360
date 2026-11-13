@@ -638,7 +638,14 @@ public final class NativeRTSPPlayer: ObservableObject {
 
         decoder?.invalidate()
         if let dec = VideoToolboxDecoder(formatDescription: desc) {
-            dec.onFrame = { pixelBuffer in
+            dec.onFrame = { [weak self] pixelBuffer in
+                guard let self = self else { return }
+                if !self.isPlaying {
+                    DispatchQueue.main.async {
+                        self.isPlaying = true
+                        self.isConnecting = false
+                    }
+                }
                 Metal360Renderer.shared.updatePixelBuffer(pixelBuffer)
             }
             self.decoder = dec
@@ -743,21 +750,11 @@ public final class NativeRTSPPlayer: ObservableObject {
             }
         }
 
-        // Renderizado directo en AVSampleBufferDisplayLayer
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self, let layer = self.targetDisplayLayer else { return }
-
-            if !self.isPlaying {
+        if !self.isPlaying {
+            DispatchQueue.main.async {
                 self.isPlaying = true
                 self.isConnecting = false
             }
-
-            if layer.status == .failed {
-                print("[NativeRTSP] DisplayLayer en estado failed. Reiniciando con flush()...")
-                layer.flush()
-            }
-
-            layer.enqueue(sb)
         }
     }
 

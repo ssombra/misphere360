@@ -34,7 +34,7 @@ static void decompressionOutputCallback(
     callbackRecord.decompressionOutputRefCon = (__bridge void *)self;
 
     NSDictionary *destinationImageBufferAttributes = @{
-        (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
+        (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange),
         (id)kCVPixelBufferMetalCompatibilityKey: @YES,
         (id)kCVPixelBufferIOSurfacePropertiesKey: @{}
     };
@@ -62,10 +62,11 @@ static void decompressionOutputCallback(
     if (!_decompressionSession) return NO;
 
     VTDecodeInfoFlags flagsOut = 0;
+    VTDecodeFrameFlags decodeFlags = kVTDecodeFrame_EnableAsynchronousDecompression | kVTDecodeFrame_1xRealTimePlayback;
     OSStatus status = VTDecompressionSessionDecodeFrame(
         _decompressionSession,
         sampleBuffer,
-        kVTDecodeFrame_EnableAsynchronousDecompression,
+        decodeFlags,
         NULL,
         &flagsOut
     );
