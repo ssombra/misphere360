@@ -715,16 +715,16 @@ public class CameraManager: ObservableObject {
         }
 
         if photoInterval > 0 {
-            // Intervalómetro activado: arranca la secuencia continua con 4868
+            // Intervalómetro: Se inicia con 4864 (PHOTO_PRESS) y la cámara dispara periódicamente hasta enviar 4864 de nuevo
             isIntervalRunning = true
             lastStatusMessage = "Intervalómetro activo cada \(photoInterval)s"
-            sendCommand(msgId: 4868, param: nil)
+            sendCommand(msgId: 4864, param: nil)
         } else if photoBracketing > 0 {
-            // Horquillado AEB / HDR activado: ráfaga de 3 fotos a diferentes EV con 4868
+            // Horquillado AEB / HDR: Con surroundexp activo, 4864 (PHOTO_PRESS) dispara la ráfaga de 3 fotos a diferentes EV
             lastStatusMessage = "Disparando ráfaga HDR (3 fotos)..."
-            sendCommand(msgId: 4868, param: nil)
+            sendCommand(msgId: 4864, param: nil)
         } else if timer > 0 {
-            // Temporizador nativo por hardware: 4868 arranca beeper y LED nativos de la cámara
+            // Temporizador nativo por hardware: Únicamente el Timer usa 4868 (PHOTO_LONGPRESS) para arrancar beeper y cuenta atrás
             lastStatusMessage = "Temporizador (\(timer)s) iniciado en la cámara..."
             sendCommand(msgId: 4868, param: nil)
         } else {
