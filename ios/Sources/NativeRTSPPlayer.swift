@@ -601,7 +601,7 @@ public final class NativeRTSPPlayer: ObservableObject {
                 CMBlockBufferReplaceDataBytes(
                     with: baseAddress,
                     blockBuffer: buffer,
-                    writeOffset: 0,
+                    offsetIntoDestination: 0,
                     dataLength: totalLength
                 )
             }
