@@ -43,6 +43,7 @@ public final class NativeRTSPPlayer: ObservableObject {
     private var spsData: Data? = nil
     private var ppsData: Data? = nil
     private var formatDescription: CMVideoFormatDescription? = nil
+    private var decompressionSession: VTDecompressionSession?
 
     // Reensamblado de unidades de fragmentación (FU-A)
     private var fuAssemblyBuffer = Data()
@@ -128,6 +129,10 @@ public final class NativeRTSPPlayer: ObservableObject {
     }
 
     private func resetState() {
+        if let sess = decompressionSession {
+            VTDecompressionSessionInvalidate(sess)
+            decompressionSession = nil
+        }
         state = .disconnected
         cseq = 1
         sessionId = nil
@@ -622,10 +627,50 @@ public final class NativeRTSPPlayer: ObservableObject {
                 if status == noErr, let formatDesc = desc {
                     self.formatDescription = formatDesc
                     print("[NativeRTSP] FormatDescription H.264 creado exitosamente.")
+                    self.createDecompressionSession()
                 } else {
                     print("[NativeRTSP] Error creando FormatDescription: \(status)")
                 }
             }
+        }
+    }
+
+    private func createDecompressionSession() {
+        guard let desc = self.formatDescription else { return }
+
+        if let oldSession = decompressionSession {
+            VTDecompressionSessionInvalidate(oldSession)
+            decompressionSession = nil
+        }
+
+        var callbackRecord = VTDecompressionOutputCallbackRecord(
+            decompressionOutputCallback: { (decompressionOutputRefCon, sourceFrameRefCon, status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
+                guard status == noErr, let pixelBuffer = imageBuffer else { return }
+                Metal360Renderer.shared.updatePixelBuffer(pixelBuffer)
+            },
+            decompressionOutputRefCon: nil
+        )
+
+        let destinationPixelBufferAttributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferMetalCompatibilityKey as String: true
+        ]
+
+        var newSession: VTDecompressionSession?
+        let status = VTDecompressionSessionCreate(
+            allocator: kCFAllocatorDefault,
+            formatDescription: desc,
+            videoDecoderSpecification: nil,
+            destinationImageBufferAttributes: destinationPixelBufferAttributes as CFDictionary,
+            outputCallback: &callbackRecord,
+            decompressionSessionOut: &newSession
+        )
+
+        if status == noErr, let sess = newSession {
+            self.decompressionSession = sess
+            print("[NativeRTSP] VTDecompressionSession creada exitosamente para Metal.")
+        } else {
+            print("[NativeRTSP] Error creando VTDecompressionSession: \(status)")
         }
     }
 
@@ -702,6 +747,21 @@ public final class NativeRTSPPlayer: ObservableObject {
                 CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DependsOnOthers).toOpaque(), Unmanaged.passUnretained(kCFBooleanFalse).toOpaque())
             } else {
                 CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque(), Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+            }
+        }
+
+        // Decodificación por hardware VideoToolbox para renderizado Metal 360 cosido en tiempo real
+        if let sess = self.decompressionSession {
+            var flagsOut = VTDecodeInfoFlags(rawValue: 0)
+            let dStatus = VTDecompressionSessionDecodeFrame(
+                sess,
+                sampleBuffer: sb,
+                flags: [._EnableAsynchronousDecompression],
+                frameRefcon: nil,
+                infoFlagsOut: &flagsOut
+            )
+            if dStatus == kVTInvalidSessionErr {
+                createDecompressionSession()
             }
         }
 

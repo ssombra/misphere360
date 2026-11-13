@@ -290,23 +290,6 @@ struct ContentView: View {
                                 }
                             }
                             .padding(10)
-
-                            // Pie flotante con sugerencia
-                            VStack {
-                                Spacer()
-                                HStack {
-                                    Spacer()
-                                    Text("Transmisión en Vivo Nativa (Dual Fisheye)")
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.70))
-                                        .padding(.horizontal, 9)
-                                        .padding(.vertical, 3)
-                                        .background(Color.black.opacity(0.45))
-                                        .cornerRadius(6)
-                                    Spacer()
-                                }
-                                .padding(.bottom, 8)
-                            }
                         }
                     } else if let image = latestStitchedImage {
                         ZStack(alignment: .topLeading) {
