@@ -665,8 +665,8 @@ struct ContentView: View {
                 if camera.currentMode == 1 {
                     location.forceSyncGPSWithCamera()
                     camera.takePhoto()
-                    // Si no es un intervalómetro ni hay cuenta regresiva pendiente, programar recarga
-                    if !camera.isIntervalRunning && camera.countdownRemaining == 0 {
+                    // Si no es un intervalómetro, programar recarga tras cumplirse el disparo
+                    if !camera.isIntervalRunning {
                         let delay: Double = camera.timer > 0 ? Double(camera.timer) + 2.5 : 2.5
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                             loadLatestPhoto(force: true)
@@ -682,15 +682,7 @@ struct ContentView: View {
                         .frame(width: 76, height: 76)
 
                     if camera.currentMode == 1 {
-                        if camera.countdownRemaining > 0 {
-                            // Cuenta atrás activa: fondo blanco con segundos
-                            Circle()
-                                .fill(Color.white)
-                                .frame(width: 62, height: 62)
-                            Text("\(camera.countdownRemaining)")
-                                .font(.system(size: 26, weight: .bold, design: .rounded))
-                                .foregroundColor(.black)
-                        } else if camera.isIntervalRunning {
+                        if camera.isIntervalRunning {
                             // Intervalómetro corriendo: botón cuadrado Stop (naranja)
                             RoundedRectangle(cornerRadius: 8)
                                 .fill(Color.orange)
