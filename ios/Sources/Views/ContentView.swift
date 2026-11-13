@@ -35,7 +35,23 @@ struct ContentView: View {
                 topStatusBar
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 6)
+
+                // Diagnóstico en vivo de comandos y registros de la cámara
+                if camera.isConnected && !camera.lastStatusMessage.isEmpty {
+                    Text(camera.lastStatusMessage)
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.yellow)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(.ultraThinMaterial)
+                        .background(Color.black.opacity(0.60))
+                        .clipShape(Capsule())
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 4)
+                }
 
                 if !(viewfinderMode == .live && renderer.isExpanded) {
                     Spacer(minLength: 4)

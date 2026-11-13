@@ -484,19 +484,38 @@ public class CameraManager: ObservableObject {
 
             case 4365: // GET_CAMERA
                 if let rec = obj["rec_time"] as? Int { self.isRecording = rec > 0 }
+                let sm = obj["sub_mode"] as? Int ?? -1
+                let tim = obj["timing"] as? Int ?? -1
+                let capInt = obj["cap_interval"] as? Int ?? -1
+                let brk = obj["surroundexp"] as? Int ?? -1
+                let capNum = obj["cap_interval_num"] as? Int ?? -1
+                let burstNum = obj["burst_num"] as? Int ?? -1
+
+                self.lastStatusMessage = "4365: sub=\(sm) | HDR=\(brk) | Int=\(capInt)s | Timer=\(tim)s (num:\(capNum),bst:\(burstNum))"
+                print("📸 GET_CAMERA_4365: \(obj)")
+
                 // Si aún no hay ajustes guardados en la app, poblar con lo que tiene la cámara:
                 if !UserDefaults.standard.bool(forKey: "cam_hasSavedSettings") {
                     if let mode = obj["mode"] as? Int { self.currentMode = mode }
                     if let timing = obj["timing"] as? Int { self.timer = timing }
                     if let interval = obj["cap_interval"] as? Int { self.photoInterval = interval }
-                    if let brk = obj["surroundexp"] as? Int { self.photoBracketing = brk }
+                    if let brkVal = obj["surroundexp"] as? Int { self.photoBracketing = brkVal }
                     if let sec = obj["second"] as? Int { self.videoShort = sec }
                     if let lapse = obj["lapse"] as? Int { self.videoTimelapse = lapse }
                     if let spd = obj["speedx"] as? Int { self.videoSlowMo = spd == 2 ? 1 : 0 }
                     self.updatePhotoSubMode()
                 }
 
-            case 4611, 4612, 4614, 4615, 4618, 4621, 4866, 4872, 4916, 4918, 4929, 5136, 5137, 5168, 5169, 5171, 5172, 6145, 6151, 6156:
+            case 4866, 4918, 4929: // RESPUESTA A TIMER, HDR O INTERVALO
+                print("📡 Respuesta msgId=\(msgId): rval=\(rval)")
+                if rval == 0 {
+                    self.lastStatusMessage = "✅ msgId \(msgId) OK (rval:0) -> consultando 4365..."
+                    self.sendCommand(msgId: 4365, param: nil)
+                } else {
+                    self.lastStatusMessage = "❌ msgId \(msgId) RECHAZADO (rval:\(rval))"
+                }
+
+            case 4611, 4612, 4614, 4615, 4618, 4621, 4872, 4916, 5136, 5137, 5168, 5169, 5171, 5172, 6145, 6151, 6156:
                 if rval == 0 {
                     print("✅ Parámetro registrado con éxito en la memoria de la cámara (msgId=\(msgId))")
                 } else {
@@ -505,17 +524,9 @@ public class CameraManager: ObservableObject {
 
             case 4864, 4868: // DISPARO FOTO
                 if rval == 0 {
-                    if self.photoInterval > 0 {
-                        self.lastStatusMessage = "Intervalómetro activo cada \(self.photoInterval)s"
-                    } else if self.photoBracketing > 0 {
-                        self.lastStatusMessage = "¡Capturando ráfaga HDR (3 fotos)!"
-                    } else if self.timer > 0 {
-                        self.lastStatusMessage = "Temporizador (\(self.timer)s) en curso..."
-                    } else {
-                        self.lastStatusMessage = "¡Foto capturada!"
-                    }
+                    self.lastStatusMessage = "Disparo \(msgId) OK (rval:\(rval)). Esperando captura..."
                     LocationManager.shared.recordCurrentShotLocation()
-                    self.refreshStatus()
+                    // No bombardear con refreshStatus() durante la captura para no cancelar ráfagas/intervalos
                 }
 
             case 5028: // INICIO VIDEO
@@ -531,11 +542,7 @@ public class CameraManager: ObservableObject {
                 if msgId == 8193 {
                     // Foto disparada físicamente en la cámara: congelar GPS de ese segundo exacto
                     LocationManager.shared.recordCurrentShotLocation()
-                    if self.timer > 0 {
-                        self.lastStatusMessage = "¡Foto con temporizador capturada!"
-                    } else if self.photoInterval > 0 {
-                        self.lastStatusMessage = "Foto de intervalo capturada. Siguiente en \(self.photoInterval)s..."
-                    }
+                    self.lastStatusMessage = "📸 Foto guardada en SD (8193)"
                     NotificationCenter.default.post(name: NSNotification.Name("CameraPhotoSavedNotification"), object: nil)
                 }
                 self.fetchBatteryStatus()
@@ -818,6 +825,7 @@ public class CameraManager: ObservableObject {
         }
         UserDefaults.standard.set(val, forKey: "cam_timer")
         UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        lastStatusMessage = "Enviando Timer (\(val)s) con msgId 4866..."
         if val > 0 {
             // Firmware Ambarella: sub_mode es mutuamente excluyente. Al activar Timer, limpiar Intervalo y HDR.
             self.photoInterval = 0
@@ -840,6 +848,7 @@ public class CameraManager: ObservableObject {
         }
         UserDefaults.standard.set(val, forKey: "cam_photoInterval")
         UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        lastStatusMessage = "Enviando Intervalo (\(val)s) con msgId 4929..."
         if val > 0 {
             // Al activar Intervalómetro, limpiar Timer y HDR.
             self.timer = 0
@@ -862,6 +871,7 @@ public class CameraManager: ObservableObject {
         }
         UserDefaults.standard.set(val, forKey: "cam_photoBracketing")
         UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        lastStatusMessage = "Enviando HDR (\(val)) con msgId 4918..."
         if val > 0 {
             // Al activar HDR / Bracketing, limpiar Timer e Intervalo.
             self.timer = 0
