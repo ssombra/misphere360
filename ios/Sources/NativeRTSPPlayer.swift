@@ -43,7 +43,7 @@ public final class NativeRTSPPlayer: ObservableObject {
     private var spsData: Data? = nil
     private var ppsData: Data? = nil
     private var formatDescription: CMVideoFormatDescription? = nil
-    private var decompressionSession: VTDecompressionSession?
+    private var decoder: VideoToolboxDecoder?
 
     // Reensamblado de unidades de fragmentación (FU-A)
     private var fuAssemblyBuffer = Data()
@@ -129,10 +129,8 @@ public final class NativeRTSPPlayer: ObservableObject {
     }
 
     private func resetState() {
-        if let sess = decompressionSession {
-            VTDecompressionSessionInvalidate(sess)
-            decompressionSession = nil
-        }
+        decoder?.invalidate()
+        decoder = nil
         state = .disconnected
         cseq = 1
         sessionId = nil
@@ -638,39 +636,15 @@ public final class NativeRTSPPlayer: ObservableObject {
     private func createDecompressionSession() {
         guard let desc = self.formatDescription else { return }
 
-        if let oldSession = decompressionSession {
-            VTDecompressionSessionInvalidate(oldSession)
-            decompressionSession = nil
-        }
-
-        var callbackRecord = VTDecompressionOutputCallbackRecord(
-            decompressionOutputCallback: { (decompressionOutputRefCon, sourceFrameRefCon, status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
-                guard status == noErr, let pixelBuffer = imageBuffer else { return }
+        decoder?.invalidate()
+        if let dec = VideoToolboxDecoder(formatDescription: desc) {
+            dec.onFrame = { pixelBuffer in
                 Metal360Renderer.shared.updatePixelBuffer(pixelBuffer)
-            },
-            decompressionOutputRefCon: nil
-        )
-
-        let destinationPixelBufferAttributes: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferMetalCompatibilityKey as String: true
-        ]
-
-        var newSession: VTDecompressionSession?
-        let status = VTDecompressionSessionCreate(
-            allocator: kCFAllocatorDefault,
-            formatDescription: desc,
-            videoDecoderSpecification: nil,
-            destinationImageBufferAttributes: destinationPixelBufferAttributes as CFDictionary,
-            outputCallback: &callbackRecord,
-            decompressionSessionOut: &newSession
-        )
-
-        if status == noErr, let sess = newSession {
-            self.decompressionSession = sess
-            print("[NativeRTSP] VTDecompressionSession creada exitosamente para Metal.")
+            }
+            self.decoder = dec
+            print("[NativeRTSP] VideoToolboxDecoder creado exitosamente para Metal.")
         } else {
-            print("[NativeRTSP] Error creando VTDecompressionSession: \(status)")
+            print("[NativeRTSP] Error creando VideoToolboxDecoder.")
         }
     }
 
@@ -705,7 +679,7 @@ public final class NativeRTSPPlayer: ObservableObject {
 
         guard status == noErr, let buffer = blockBuffer else { return }
 
-        _ = blockData.withUnsafeBytes { rawBuffer in
+        blockData.withUnsafeBytes { rawBuffer in
             if let baseAddress = rawBuffer.baseAddress {
                 CMBlockBufferReplaceDataBytes(
                     with: baseAddress,
@@ -751,18 +725,8 @@ public final class NativeRTSPPlayer: ObservableObject {
         }
 
         // Decodificación por hardware VideoToolbox para renderizado Metal 360 cosido en tiempo real
-        if let sess = self.decompressionSession {
-            var flagsOut = VTDecodeInfoFlags(rawValue: 0)
-            let dStatus = VTDecompressionSessionDecodeFrame(
-                sess,
-                sampleBuffer: sb,
-                flags: [._EnableAsynchronousDecompression],
-                frameRefcon: nil,
-                infoFlagsOut: &flagsOut
-            )
-            if dStatus == kVTInvalidSessionErr {
-                createDecompressionSession()
-            }
+        if let dec = self.decoder {
+            _ = dec.decodeSampleBuffer(sb)
         }
 
         // Registrar métrica de cuadros y hora del último cuadro
