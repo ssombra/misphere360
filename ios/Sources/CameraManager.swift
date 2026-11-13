@@ -522,11 +522,28 @@ public class CameraManager: ObservableObject {
                     print("⚠️ Aviso: Cámara respondió rval=\(rval) al msgId=\(msgId)")
                 }
 
-            case 4864, 4868: // DISPARO FOTO
+            case 4864, 4868, 5025, 5029: // DISPARO FOTO Y SUB-MODOS (5025: Intervalo, 5029: HDR Bracketing)
                 if rval == 0 {
-                    self.lastStatusMessage = "Disparo \(msgId) OK (rval:\(rval)). Esperando captura..."
+                    if msgId == 5025 {
+                        let param = obj["param"] as? Int ?? 0
+                        if param == -1 {
+                            self.isIntervalRunning = false
+                            self.lastStatusMessage = "Intervalómetro detenido."
+                        } else {
+                            self.isIntervalRunning = true
+                            self.lastStatusMessage = "Intervalómetro activo (5025)."
+                        }
+                    } else if msgId == 5029 {
+                        self.lastStatusMessage = "Disparando ráfaga HDR (5029)..."
+                    } else {
+                        self.lastStatusMessage = "Disparo \(msgId) OK (rval:\(rval)). Esperando captura..."
+                    }
                     LocationManager.shared.recordCurrentShotLocation()
-                    // No bombardear con refreshStatus() durante la captura para no cancelar ráfagas/intervalos
+                } else if rval == 128 {
+                    // Notificación de progreso asíncrona del firmware
+                    if msgId == 5025, let shotNum = obj["param"] as? Int {
+                        self.lastStatusMessage = "Intervalómetro: captura #\(shotNum)..."
+                    }
                 }
 
             case 5028: // INICIO VIDEO
@@ -738,14 +755,13 @@ public class CameraManager: ObservableObject {
         }
 
         if photoInterval > 0 {
-            // Intervalómetro: Se inicia con 4864 (PHOTO_PRESS) y la cámara dispara periódicamente hasta enviar 4864 de nuevo
-            isIntervalRunning = true
-            lastStatusMessage = "Intervalómetro activo cada \(photoInterval)s"
-            sendCommand(msgId: 4864, param: nil)
+            // Intervalómetro: Se inicia con 5025 (AMBA_MSGID_SHOOT_PHOTO_INTERVAL)
+            lastStatusMessage = "Iniciando intervalómetro (5025)..."
+            sendCommand(msgId: 5025, param: nil)
         } else if photoBracketing > 0 {
-            // Horquillado AEB / HDR: Con surroundexp activo, 4864 (PHOTO_PRESS) dispara la ráfaga de 3 fotos a diferentes EV
-            lastStatusMessage = "Disparando ráfaga HDR (3 fotos)..."
-            sendCommand(msgId: 4864, param: nil)
+            // Horquillado AEB / HDR: Con surroundexp activo, se inicia con 5029 (AMBA_MSGID_START_PHOTO_BRACKETING)
+            lastStatusMessage = "Disparando ráfaga HDR (5029)..."
+            sendCommand(msgId: 5029, param: nil)
         } else if timer > 0 {
             // Temporizador nativo por hardware: Únicamente el Timer usa 4868 (PHOTO_LONGPRESS) para arrancar beeper y cuenta atrás
             lastStatusMessage = "Temporizador (\(timer)s) iniciado en la cámara..."
@@ -761,10 +777,10 @@ public class CameraManager: ObservableObject {
     }
 
     public func stopInterval() {
+        // Enviar 5025 detiene el ciclo del intervalómetro en la cámara (responde param: -1)
+        sendCommand(msgId: 5025, param: nil)
         isIntervalRunning = false
-        // Enviar 4864 detiene el ciclo del intervalómetro en el procesador Ambarella
-        sendCommand(msgId: 4864, param: nil)
-        lastStatusMessage = "Intervalómetro detenido."
+        lastStatusMessage = "Deteniendo intervalómetro..."
     }
 
     // NOTA TÉCNICA: La Xiaomi Mi Sphere 360 emite el flujo RTSP en rtsp://192.168.42.1/live de manera

@@ -681,8 +681,8 @@ struct ContentView: View {
                 if camera.currentMode == 1 {
                     location.forceSyncGPSWithCamera()
                     camera.takePhoto()
-                    // Si no es un intervalómetro, programar recarga tras cumplirse el disparo
-                    if !camera.isIntervalRunning {
+                    // Si no es un intervalómetro ni HDR, programar recarga tras cumplirse el disparo
+                    if !camera.isIntervalRunning && camera.photoBracketing == 0 {
                         let delay: Double = camera.timer > 0 ? Double(camera.timer) + 2.5 : 2.5
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                             loadLatestPhoto(force: true)
