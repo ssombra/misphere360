@@ -16,7 +16,6 @@ struct ContentView: View {
 
     enum ViewfinderMode: String, CaseIterable {
         case off = "Off"
-        case photo = "Foto 360°"
         case live = "En Vivo"
     }
     @State private var viewfinderMode: ViewfinderMode = .off
@@ -45,11 +44,7 @@ struct ContentView: View {
 
                 Spacer(minLength: 4)
 
-                // 3. Selector de Modo Principal (FOTO vs VIDEO)
-                modeSelector
-                    .padding(.bottom, 10)
-
-                // 4. Panel Completo de Ajustes de la Cámara
+                // 3. Panel Completo de Ajustes de la Cámara
                 if camera.isConnected {
                     if camera.currentMode == 1 {
                         photoControlsPanel
@@ -156,7 +151,26 @@ struct ContentView: View {
 
             Spacer()
 
-            // Botón de Ajustes (Círculo translúcido blanco)
+            // Botón de Reconexión / Refresco de Estado (Círculo 36x36)
+            Button {
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
+                if camera.isConnected {
+                    camera.refreshStatus()
+                } else {
+                    camera.connect()
+                }
+            } label: {
+                Image(systemName: camera.isConnected ? "arrow.clockwise" : "link.badge.plus")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 36, height: 36)
+                    .background(.ultraThinMaterial)
+                    .background(Color.white.opacity(0.10))
+                    .clipShape(Circle())
+            }
+
+            // Botón de Ajustes (Círculo 36x36)
             Button {
                 let impact = UIImpactFeedbackGenerator(style: .light)
                 impact.impactOccurred()
@@ -229,34 +243,9 @@ struct ContentView: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
                 )
             } else {
-                // Zona Central: Visor 360° Interactivo, Visor en Vivo RTSP o Apagado (Off)
+                // Zona Central: Visor en Vivo RTSP o Apagado (Off)
                 ZStack {
-                    if viewfinderMode == .off {
-                        ZStack(alignment: .topLeading) {
-                            VStack(spacing: 8) {
-                                Spacer()
-                                Image(systemName: "eye.slash")
-                                    .font(.system(size: 28, weight: .light))
-                                    .foregroundColor(.white.opacity(0.35))
-                                Text("Visor desactivado")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.65))
-                                Text("Selecciona 'Foto 360°' o 'En Vivo' para activar")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.white.opacity(0.35))
-                                Spacer()
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 200)
-
-                            // Cabecera flotante
-                            HStack {
-                                modeSwitchPill
-                                Spacer()
-                            }
-                            .padding(10)
-                        }
-                    } else if viewfinderMode == .live {
+                    if viewfinderMode == .live {
                         ZStack(alignment: .topLeading) {
                             LiveViewPlayerView()
                                 .frame(maxWidth: .infinity)
@@ -291,147 +280,26 @@ struct ContentView: View {
                             }
                             .padding(10)
                         }
-                    } else if let image = latestStitchedImage {
-                        ZStack(alignment: .topLeading) {
-                            Web360Viewer(image: image, enableMotion: false)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 200)
-                                .cornerRadius(20)
-                                .clipped()
-
-                            // Cabecera flotante: Selector de modo y botones de acción
-                            HStack {
-                                modeSwitchPill
-
-                                Spacer()
-
-                                // Expandir a pantalla completa
-                                if let item = latestPhotoItem {
-                                    Button {
-                                        let impact = UIImpactFeedbackGenerator(style: .medium)
-                                        impact.impactOccurred()
-                                        selectedPreviewItem = item
-                                    } label: {
-                                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                            .font(.system(size: 11, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .frame(width: 28, height: 28)
-                                            .background(.ultraThinMaterial)
-                                            .background(Color.black.opacity(0.40))
-                                            .clipShape(Circle())
-                                            .overlay(
-                                                Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
-                                            )
-                                    }
-                                }
-
-                                // Recargar última captura
-                                Button {
-                                    let impact = UIImpactFeedbackGenerator(style: .light)
-                                    impact.impactOccurred()
-                                    loadLatestPhoto(force: true)
-                                } label: {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .frame(width: 28, height: 28)
-                                        .background(.ultraThinMaterial)
-                                        .background(Color.black.opacity(0.40))
-                                        .clipShape(Circle())
-                                        .overlay(
-                                            Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
-                                        )
-                                }
-                            }
-                            .padding(10)
-
-                            // Pie flotante con sugerencia de gesto
-                            VStack {
-                                Spacer()
-                                HStack {
-                                    Spacer()
-                                    Text("Arrastra para explorar en 360°")
-                                        .font(.system(size: 10, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.70))
-                                        .padding(.horizontal, 9)
-                                        .padding(.vertical, 3)
-                                        .background(Color.black.opacity(0.45))
-                                        .cornerRadius(6)
-                                    Spacer()
-                                }
-                                .padding(.bottom, 8)
-                            }
-                        }
-                    } else if isLoadingLatestPhoto {
-                        ZStack(alignment: .topLeading) {
-                            VStack(spacing: 10) {
-                                Spacer()
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(1.2)
-                                Text(latestPhotoStatus)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.85))
-                                Spacer()
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 200)
-
-                            HStack {
-                                modeSwitchPill
-                                Spacer()
-                            }
-                            .padding(10)
-                        }
                     } else {
+                        // Modo Off: Standby minimalista
                         ZStack(alignment: .topLeading) {
                             VStack(spacing: 8) {
                                 Spacer()
-                                Image(systemName: "photo.on.rectangle.angled")
-                                    .font(.system(size: 32, weight: .light))
+                                Image(systemName: "video.slash")
+                                    .font(.system(size: 28, weight: .light))
+                                    .foregroundColor(.white.opacity(0.35))
+                                Text("Feed en vivo desactivado")
+                                    .font(.system(size: 13, weight: .medium))
                                     .foregroundColor(.white.opacity(0.65))
-
-                                Text("Visor 360° de Última Captura")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundColor(.white)
-
-                                if let err = loadErrorMessage {
-                                    Text(err)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundColor(.orange)
-                                        .multilineTextAlignment(.center)
-                                        .padding(.horizontal, 20)
-                                } else {
-                                    Text("Dispara una foto o pulsa cargar para explorar aquí en 360°")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.white.opacity(0.60))
-                                        .multilineTextAlignment(.center)
-                                        .padding(.horizontal, 24)
-                                }
-
-                                Button {
-                                    let impact = UIImpactFeedbackGenerator(style: .medium)
-                                    impact.impactOccurred()
-                                    loadLatestPhoto(force: true)
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "arrow.clockwise")
-                                            .font(.system(size: 11, weight: .bold))
-                                        Text("Cargar última foto")
-                                            .font(.system(size: 12, weight: .semibold))
-                                    }
-                                    .foregroundColor(.black)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 7)
-                                    .background(Color.white)
-                                    .clipShape(Capsule())
-                                }
-                                .padding(.top, 4)
+                                Text("Activa 'En Vivo' para ver la transmisión 360°")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.35))
                                 Spacer()
                             }
                             .frame(maxWidth: .infinity)
                             .frame(height: 200)
 
+                            // Cabecera flotante
                             HStack {
                                 modeSwitchPill
                                 Spacer()
@@ -453,23 +321,30 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Selector de Modo del Visor Central
+    // MARK: - Selector de Modo del Visor Central (Switch Off / En Vivo)
 
     private var modeSwitchPill: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 3) {
             ForEach(ViewfinderMode.allCases, id: \.self) { mode in
                 Button {
                     let impact = UIImpactFeedbackGenerator(style: .light)
                     impact.impactOccurred()
                     viewfinderMode = mode
                 } label: {
-                    Text(mode.rawValue)
-                        .font(.system(size: 11, weight: viewfinderMode == mode ? .bold : .medium))
-                        .foregroundColor(viewfinderMode == mode ? .black : .white.opacity(0.70))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(viewfinderMode == mode ? Color.white : Color.clear)
-                        .clipShape(Capsule())
+                    HStack(spacing: 4) {
+                        if mode == .live {
+                            Circle()
+                                .fill(viewfinderMode == .live ? (rtspPlayer.isPlaying ? Color.green : Color.orange) : Color.white.opacity(0.40))
+                                .frame(width: 5, height: 5)
+                        }
+                        Text(mode.rawValue)
+                            .font(.system(size: 11, weight: viewfinderMode == mode ? .bold : .medium))
+                            .foregroundColor(viewfinderMode == mode ? .black : .white.opacity(0.70))
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(viewfinderMode == mode ? Color.white : Color.clear)
+                    .clipShape(Capsule())
                 }
             }
         }
@@ -482,17 +357,17 @@ struct ContentView: View {
         )
     }
 
-    // MARK: - Selector de Modo (Íconos Foto y Video)
+    // MARK: - Selector de Modo Foto / Video (Ubicado abajo a la derecha)
 
     private var modeSelector: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 3) {
             Button {
                 let impact = UIImpactFeedbackGenerator(style: .light)
                 impact.impactOccurred()
                 camera.switchMode(1)
             } label: {
                 Image(systemName: "camera.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(camera.currentMode == 1 ? .black : .white.opacity(0.65))
                     .frame(width: 38, height: 38)
                     .background(camera.currentMode == 1 ? Color.white : Color.clear)
@@ -505,7 +380,7 @@ struct ContentView: View {
                 camera.switchMode(0)
             } label: {
                 Image(systemName: "video.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(camera.currentMode == 0 ? .black : .white.opacity(0.65))
                     .frame(width: 38, height: 38)
                     .background(camera.currentMode == 0 ? Color.white : Color.clear)
@@ -517,7 +392,7 @@ struct ContentView: View {
         .background(Color.white.opacity(0.10))
         .clipShape(Capsule())
         .overlay(
-            Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+            Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
         )
     }
 
@@ -816,27 +691,8 @@ struct ContentView: View {
 
             Spacer()
 
-            // Botón de Reconexión / Refresco
-            Button {
-                let impact = UIImpactFeedbackGenerator(style: .light)
-                impact.impactOccurred()
-                if camera.isConnected {
-                    camera.refreshStatus()
-                } else {
-                    camera.connect()
-                }
-            } label: {
-                Image(systemName: camera.isConnected ? "arrow.clockwise" : "link.badge.plus")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(width: 52, height: 52)
-                    .background(.ultraThinMaterial)
-                    .background(Color.white.opacity(0.10))
-                    .clipShape(Circle())
-                    .overlay(
-                        Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5)
-                    )
-            }
+            // Selector de Modo Foto / Video (Ubicado abajo a la derecha)
+            modeSelector
         }
     }
 
