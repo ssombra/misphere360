@@ -156,9 +156,15 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
 
         // Gesto de arrastre para explorar en 360°
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        pan.delegate = context.coordinator
         mtkView.addGestureRecognizer(pan)
 
-        // Doble toque para centrar vista
+        // Gesto de pellizco para zoom in / out
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+        pinch.delegate = context.coordinator
+        mtkView.addGestureRecognizer(pinch)
+
+        // Doble toque para centrar vista y restablecer zoom
         let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         mtkView.addGestureRecognizer(doubleTap)
@@ -172,7 +178,7 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
         Coordinator()
     }
 
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         private var lastLocation: CGPoint = .zero
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
@@ -187,10 +193,21 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
             }
         }
 
+        @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            if gesture.state == .changed {
+                Metal360Renderer.shared.handlePinch(scale: gesture.scale)
+                gesture.scale = 1.0
+            }
+        }
+
         @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
             let impact = UIImpactFeedbackGenerator(style: .medium)
             impact.impactOccurred()
             Metal360Renderer.shared.resetOrientation()
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            return true
         }
     }
 }

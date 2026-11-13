@@ -255,6 +255,15 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         }
     }
 
+    public func handlePinch(scale: CGFloat) {
+        guard scale > 0 else { return }
+        let newFov = fovDeg / Float(scale)
+        fovDeg = max(35.0, min(115.0, newFov))
+        DispatchQueue.main.async { [weak self] in
+            self?.mtkView?.setNeedsDisplay()
+        }
+    }
+
     public func resetOrientation() {
         yaw = 0.0
         pitch = 0.0
