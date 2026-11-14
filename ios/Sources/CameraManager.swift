@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import Combine
+import UIKit
 
 /// Modelo de archivo en la tarjeta microSD de la cámara
 public struct SDFileItem: Identifiable, Hashable {
@@ -57,6 +58,16 @@ public class CameraManager: ObservableObject {
     @Published public var videoWB: Int = 0
     @Published public var videoLoop: Int = 0        // 0: Desactivado, 1: 1 min, 2: 2 min, 5: 5 min
 
+    // HARDWARE / AJUSTES DEL SISTEMA
+    @Published public var buzzerLevel: Int = 4      // 0: Silencio, 1: Bajo, 2: Medio, 4: Alto
+    @Published public var autoOffMinutes: Int = 10  // 0: Off, 5 min, 10 min
+    @Published public var ledEnabled: Bool = true
+
+    // ESTADO DE CAPTURA AVANZADA
+    @Published public var isIntervalRunning: Bool = false
+    @Published public var countdownRemaining: Int = 0
+    private var countdownTimer: Timer?
+
     // ALMACENAMIENTO SD
     @Published public var sdTotalMB: Int = 0
     @Published public var sdFreeMB: Int = 0
@@ -99,6 +110,7 @@ public class CameraManager: ObservableObject {
     // Callbacks pendientes para comandos TCP asíncronos (cola FIFO por msgId)
     private var pendingCallbacks: [Int: [([String: Any]) -> Void]] = [:]
     private var lastSendTime: TimeInterval = 0.0
+    private var hasSyncedSettingsOnConnect = false
 
     private var connection: NWConnection?
     private let queue = DispatchQueue(label: "com.ssombra.misphere360.tcp", qos: .userInitiated)
@@ -109,6 +121,7 @@ public class CameraManager: ObservableObject {
     private var receiveBuffer = ""
 
     public init() {
+        loadPersistedSettings()
         startWatchdog()
     }
 
@@ -237,6 +250,7 @@ public class CameraManager: ObservableObject {
             self.isConnected = false
             self.isConnecting = false
             self.sessionToken = 0
+            self.isIntervalRunning = false
         }
     }
 
@@ -259,6 +273,43 @@ public class CameraManager: ObservableObject {
             self.handshakeTimeoutItem = timeout
             DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: timeout)
         }
+    }
+
+    private func registerClientInfo(token: Int) {
+        let localIP = getLocalWiFiIP()
+        let packet: [String: Any] = [
+            "msg_id": 261,
+            "param": localIP,
+            "token": token,
+            "type": "TCP"
+        ]
+        sendCustomPacket(packet, msgId: 261)
+    }
+
+    private func getLocalWiFiIP() -> String {
+        var address = "192.168.42.2"
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return address }
+        defer { freeifaddrs(ifaddr) }
+
+        for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+            let interface = ptr.pointee
+            let addrFamily = interface.ifa_addr.pointee.sa_family
+            if addrFamily == UInt8(AF_INET) {
+                let name = String(cString: interface.ifa_name)
+                var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
+                            &hostname, socklen_t(hostname.count), nil, socklen_t(0), NI_NUMERICHOST)
+                let ip = String(cString: hostname)
+                if ip.hasPrefix("192.168.42.") {
+                    return ip
+                }
+                if name == "en0" && !ip.isEmpty {
+                    address = ip
+                }
+            }
+        }
+        return address
     }
 
     // MARK: - Envío y Recepción TCP (Garantizando param como String y pausa mínima)
@@ -380,7 +431,8 @@ public class CameraManager: ObservableObject {
 
     private func handleParsedJSON(_ obj: [String: Any]) {
         let msgId = obj["msg_id"] as? Int ?? 0
-        let rval = obj["rval"] as? Int ?? -1
+        let rvalOpt = obj["rval"] as? Int
+        let rval = rvalOpt ?? -1
 
         // Si había un callback esperando este msgId, ejecutar el primero en cola (FIFO)
         var callbackToRun: (([String: Any]) -> Void)? = nil
@@ -400,7 +452,9 @@ public class CameraManager: ObservableObject {
                     self.isConnected = true
                     self.isConnecting = false
                     self.lastStatusMessage = "Cámara Conectada"
+                    self.registerClientInfo(token: tok)
                     self.syncCameraDate()
+                    self.hasSyncedSettingsOnConnect = false
                     self.fetchInitialState()
                 } else {
                     self.lastStatusMessage = "Reconectando con la cámara..."
@@ -440,18 +494,6 @@ public class CameraManager: ObservableObject {
 
             case 4364: // GET_DEVICE
                 if let b = obj["battery"] as? Int { self.updateBattery(from: b) }
-                if let pres = obj["p_res"] as? Int { self.photoRes = pres }
-                if let vres = obj["v_res"] as? Int { self.videoRes = vres }
-                if let loopVal = obj["loop"] as? Int { self.videoLoop = loopVal }
-                if let wb = obj["still_wb"] as? Int { self.wb = wb }
-                if let iso = obj["still_iso"] as? Int { self.iso = iso }
-                if let ev = obj["still_ev"] as? Int { self.ev = Double(ev) / 2.0 }
-                if let sht = obj["still_shutter"] as? Int {
-                    self.shutterRaw = sht
-                    self.shutter = self.decodeShutter(sht)
-                }
-                if let vwb = obj["video_wb"] as? Int { self.videoWB = vwb }
-                if let vev = obj["video_ev"] as? Int { self.videoEV = Double(vev) / 2.0 }
                 if let sn = obj["sn"] as? String { self.serialNumber = sn }
                 if let product = obj["product"] as? String { self.deviceName = product }
                 if let ver = obj["ver"] as? String {
@@ -461,35 +503,137 @@ public class CameraManager: ObservableObject {
                 if let cjpg = obj["cam_jpg"] as? Int, self.remainJPG == 0 { self.remainJPG = cjpg }
                 if let cmp4 = obj["cam_mp4"] as? Int, self.remainVideo == 0 { self.remainVideo = cmp4 * 60 }
 
+                // Si aún no hay ajustes guardados en la app, poblar con lo que tiene la cámara:
+                if !UserDefaults.standard.bool(forKey: "cam_hasSavedSettings") {
+                    if let pres = obj["p_res"] as? Int { self.photoRes = pres }
+                    if let vres = obj["v_res"] as? Int { self.videoRes = vres }
+                    if let loopVal = obj["loop"] as? Int { self.videoLoop = loopVal }
+                    if let wb = obj["still_wb"] as? Int { self.wb = wb }
+                    if let iso = obj["still_iso"] as? Int { self.iso = iso }
+                    if let ev = obj["still_ev"] as? Int { self.ev = Double(ev) / 2.0 }
+                    if let sht = obj["still_shutter"] as? Int {
+                        self.shutterRaw = sht
+                        self.shutter = self.decodeShutter(sht)
+                    }
+                    if let vwb = obj["video_wb"] as? Int { self.videoWB = vwb }
+                    if let vev = obj["video_ev"] as? Int { self.videoEV = Double(vev) / 2.0 }
+                    if let bzr = obj["buzzer"] as? Int { self.buzzerLevel = bzr }
+                    if let poff = obj["poweroff_time"] as? Int { self.autoOffMinutes = poff }
+                    if let ledVal = obj["led"] as? Int { self.ledEnabled = (ledVal != 0) }
+                }
+
+            case 4362: // GET_CAMERA_STATE
+                if let camStatus = (obj["param"] as? Int) ?? Int(obj["param"] as? String ?? "") ?? (obj["status"] as? Int) {
+                    self.applyCameraState(camStatus)
+                } else if !self.hasSyncedSettingsOnConnect {
+                    self.hasSyncedSettingsOnConnect = true
+                    self.syncSettingsToCamera()
+                }
+
             case 4365: // GET_CAMERA
-                if let mode = obj["mode"] as? Int { self.currentMode = mode }
-                if let rec = obj["rec_time"] as? Int { self.isRecording = rec > 0 }
-                if let timing = obj["timing"] as? Int { self.timer = timing }
-                if let interval = obj["cap_interval"] as? Int { self.photoInterval = interval }
-                if let brk = obj["surroundexp"] as? Int { self.photoBracketing = brk }
-                if let sec = obj["second"] as? Int { self.videoShort = sec }
-                if let lapse = obj["lapse"] as? Int { self.videoTimelapse = lapse }
-                if let spd = obj["speedx"] as? Int { self.videoSlowMo = spd == 2 ? 1 : 0 }
+                if let camStatus = obj["status"] as? Int {
+                    self.applyCameraState(camStatus)
+                }
+                let sm = obj["sub_mode"] as? Int ?? -1
+                let tim = obj["timing"] as? Int ?? -1
+                let capInt = obj["cap_interval"] as? Int ?? -1
+                let brk = obj["surroundexp"] as? Int ?? -1
+                let capNum = obj["cap_interval_num"] as? Int ?? -1
+                let burstNum = obj["burst_num"] as? Int ?? -1
 
-            case 4611: // SWITCH_MODE
-                if rval == 0 {
-                    if let p = obj["param"] as? Int { self.currentMode = p }
-                    else if let pStr = obj["param"] as? String, let pInt = Int(pStr) { self.currentMode = pInt }
-                    self.lastStatusMessage = self.currentMode == 1 ? "Modo Foto 360°" : "Modo Video 360°"
+                self.lastStatusMessage = "4365: sub=\(sm) | HDR=\(brk) | Int=\(capInt)s | Timer=\(tim)s (num:\(capNum),bst:\(burstNum))"
+                print("📸 GET_CAMERA_4365: \(obj)")
+
+                // Si aún no hay ajustes guardados en la app, poblar con lo que tiene la cámara:
+                if !UserDefaults.standard.bool(forKey: "cam_hasSavedSettings") {
+                    if let mode = obj["mode"] as? Int { self.currentMode = mode }
+                    if let timing = obj["timing"] as? Int { self.timer = timing }
+                    if let interval = obj["cap_interval"] as? Int { self.photoInterval = interval }
+                    if let brkVal = obj["surroundexp"] as? Int { self.photoBracketing = brkVal }
+                    if let sec = obj["second"] as? Int { self.videoShort = sec }
+                    if let lapse = obj["lapse"] as? Int { self.videoTimelapse = lapse }
+                    if let spd = obj["speedx"] as? Int { self.videoSlowMo = spd == 2 ? 1 : 0 }
+                    self.updatePhotoSubMode()
                 }
 
-            case 4864, 4868: // DISPARO FOTO
+            case 4866, 4918, 4929: // RESPUESTA A TIMER, HDR O INTERVALO
+                print("📡 Respuesta msgId=\(msgId): rval=\(rval)")
                 if rval == 0 {
-                    self.lastStatusMessage = "¡Foto capturada!"
+                    self.lastStatusMessage = "✅ msgId \(msgId) OK (rval:0) -> consultando 4365..."
+                    self.sendCommand(msgId: 4365, param: nil)
+                } else {
+                    self.lastStatusMessage = "❌ msgId \(msgId) RECHAZADO (rval:\(rval))"
+                }
+
+            case 4611: // SET_CAMERA_MODE / Cambio físico de modo en la cámara (0=Video, 1=Foto)
+                if let newMode = (obj["param"] as? Int) ?? Int(obj["param"] as? String ?? ""),
+                   (newMode == 0 || newMode == 1) {
+                    if self.currentMode != newMode {
+                        self.currentMode = newMode
+                        UserDefaults.standard.set(newMode, forKey: "cam_currentMode")
+                        self.lastStatusMessage = newMode == 1 ? "Modo Foto (cámara)" : "Modo Video (cámara)"
+                    }
+                } else if rval == 0 {
+                    print("✅ Modo registrado con éxito en la cámara (msgId=4611)")
+                } else if let rvalVal = rvalOpt {
+                    print("⚠️ Aviso: Cámara respondió rval=\(rvalVal) al msgId=4611")
+                }
+
+            case 4612, 4614, 4615, 4618, 4621, 4872, 4916, 5136, 5137, 5168, 5169, 5171, 5172, 6145, 6151, 6156:
+                if rval == 0 {
+                    print("✅ Parámetro registrado con éxito en la memoria de la cámara (msgId=\(msgId))")
+                } else {
+                    print("⚠️ Aviso: Cámara respondió rval=\(rval) al msgId=\(msgId)")
+                }
+
+            case 4864, 4868, 5025, 5029: // DISPARO FOTO Y SUB-MODOS (5025: Intervalo, 5029: HDR Bracketing)
+                if rval == 0 {
+                    if msgId == 5025 {
+                        let rawParam = obj["param"]
+                        let paramStr = String(describing: rawParam ?? "")
+                        if paramStr == "-1" || (rawParam as? Int) == -1 {
+                            self.isIntervalRunning = false
+                            self.lastStatusMessage = "Intervalómetro detenido (5025)."
+                        } else {
+                            self.isIntervalRunning = true
+                            self.lastStatusMessage = "Intervalómetro activo (5025)."
+                        }
+                    } else if msgId == 5029 {
+                        self.lastStatusMessage = "Disparando ráfaga HDR (5029)..."
+                    } else {
+                        self.lastStatusMessage = "Disparo \(msgId) OK (rval:\(rval)). Esperando captura..."
+                    }
                     LocationManager.shared.recordCurrentShotLocation()
-                    self.refreshStatus()
+                } else if rval == 128 {
+                    // Notificación de progreso asíncrona del firmware
+                    if msgId == 5025, let shotNum = obj["param"] as? Int {
+                        self.lastStatusMessage = "Intervalómetro: captura #\(shotNum)..."
+                    }
                 }
 
-            case 5028: // INICIO VIDEO
-                if rval == 0 { self.isRecording = true; self.lastStatusMessage = "Grabando video..." }
+            case 513, 4620, 4623, 5028: // INICIO VIDEO (513: Normal, 4620: Corto, 4623: Timelapse, 5028: SlowMo)
+                if let rvalVal = rvalOpt {
+                    if rvalVal == 0 || rvalVal == 128 {
+                        self.isRecording = true
+                        self.lastStatusMessage = "Grabando video (\(msgId))..."
+                    } else if rvalVal == -1 {
+                        // La cámara suele emitir un rval:-1 transitorio antes del 0/128 al arrancar video
+                        print("⚠️ Respuesta transitoria en inicio de video (\(msgId), rval:-1)")
+                    } else {
+                        self.isRecording = false
+                        self.lastStatusMessage = "❌ Error al iniciar video (\(msgId), rval:\(rvalVal))"
+                    }
+                }
 
             case 514: // FIN VIDEO
-                if rval == 0 { self.isRecording = false; self.lastStatusMessage = "Video guardado." }
+                if let rvalVal = rvalOpt {
+                    if rvalVal == 0 || rvalVal == 128 {
+                        self.isRecording = false
+                        self.lastStatusMessage = "Video guardado."
+                    } else {
+                        self.lastStatusMessage = "❌ Error al detener video (514, rval:\(rvalVal))"
+                    }
+                }
 
             case 6165: // GYRO_CALIB
                 if rval == 0 { self.lastStatusMessage = "Giroscopio calibrado." }
@@ -498,10 +642,25 @@ public class CameraManager: ObservableObject {
                 if msgId == 8193 {
                     // Foto disparada físicamente en la cámara: congelar GPS de ese segundo exacto
                     LocationManager.shared.recordCurrentShotLocation()
+                    self.lastStatusMessage = "📸 Foto guardada en SD (8193)"
                     NotificationCenter.default.post(name: NSNotification.Name("CameraPhotoSavedNotification"), object: nil)
+                } else if msgId == 8192 {
+                    // Video terminado y guardado en microSD (fundamental para Video Corto automático)
+                    self.isRecording = false
+                    self.lastStatusMessage = "🎥 Video guardado en SD (8192)"
                 }
                 self.fetchBatteryStatus()
                 self.fetchStorageStatus()
+
+            case 1793: // AMBA_MSGID_QUERY_SESSION_HOLDER ("¿sigues usando la sesión?")
+                if self.sessionToken > 0 {
+                    let reply: [String: Any] = [
+                        "msg_id": 1793,
+                        "token": self.sessionToken,
+                        "param": self.sessionToken
+                    ]
+                    self.sendCustomPacket(reply, msgId: 1793)
+                }
 
             default:
                 break
@@ -519,11 +678,42 @@ public class CameraManager: ObservableObject {
     }
 
     public func fetchInitialState() {
+        sendCommand(msgId: 4362, param: nil) // Camera state (0=Idle, 3/4/5/13=Video, 12=Interval)
         sendCommand(msgId: 4364, param: nil) // Device status
         sendCommand(msgId: 4365, param: nil) // Camera status
         sendCommand(msgId: 4361, param: nil) // Battery
         sendCommand(msgId: 4358, param: nil) // Storage
         sendCommand(msgId: 1539, param: nil) // Wi-Fi info
+    }
+
+    private func applyCameraState(_ camStatus: Int) {
+        if [3, 4, 5, 13].contains(camStatus) {
+            self.isRecording = true
+            self.isIntervalRunning = false
+            self.currentMode = 0
+            switch camStatus {
+            case 4: self.videoSubMode = 1
+            case 5: self.videoSubMode = 2
+            case 13: self.videoSubMode = 4
+            default: self.videoSubMode = 0
+            }
+            self.hasSyncedSettingsOnConnect = true
+            self.lastStatusMessage = "Grabación en curso detectada (estado \(camStatus))"
+        } else if camStatus == 12 {
+            self.isIntervalRunning = true
+            self.isRecording = false
+            self.currentMode = 1
+            self.photoSubMode = 2
+            self.hasSyncedSettingsOnConnect = true
+            self.lastStatusMessage = "Intervalómetro en curso detectado (estado 12)"
+        } else if camStatus == 0 {
+            self.isRecording = false
+            self.isIntervalRunning = false
+            if !self.hasSyncedSettingsOnConnect {
+                self.hasSyncedSettingsOnConnect = true
+                self.syncSettingsToCamera()
+            }
+        }
     }
 
     public func fetchBatteryStatus() {
@@ -560,9 +750,130 @@ public class CameraManager: ObservableObject {
         sendCommand(msgId: 1539, param: nil)
     }
 
+    // MARK: - Persistencia Local (UserDefaults) y Sincronización con Cámara
+
+    public func loadPersistedSettings() {
+        let ud = UserDefaults.standard
+        guard ud.bool(forKey: "cam_hasSavedSettings") else { return }
+
+        if let v = ud.object(forKey: "cam_currentMode") as? Int { self.currentMode = v }
+        if let v = ud.object(forKey: "cam_photoRes") as? Int { self.photoRes = v }
+        if let v = ud.object(forKey: "cam_iso") as? Int { self.iso = v }
+        if let v = ud.object(forKey: "cam_shutterRaw") as? Int { self.shutterRaw = v }
+        if let v = ud.string(forKey: "cam_shutter") { self.shutter = v }
+        if let v = ud.object(forKey: "cam_ev") as? Double { self.ev = v }
+        if let v = ud.object(forKey: "cam_wb") as? Int { self.wb = v }
+        if let v = ud.object(forKey: "cam_timer") as? Int { self.timer = v }
+        if let v = ud.object(forKey: "cam_photoInterval") as? Int { self.photoInterval = v }
+        if let v = ud.object(forKey: "cam_photoBracketing") as? Int { self.photoBracketing = v }
+        if let v = ud.object(forKey: "cam_videoRes") as? Int { self.videoRes = v }
+        if let v = ud.object(forKey: "cam_videoShort") as? Int { self.videoShort = v }
+        if let v = ud.object(forKey: "cam_videoTimelapse") as? Int { self.videoTimelapse = v }
+        if let v = ud.object(forKey: "cam_videoSlowMo") as? Int { self.videoSlowMo = v }
+        if let v = ud.object(forKey: "cam_videoEV") as? Double { self.videoEV = v }
+        if let v = ud.object(forKey: "cam_videoWB") as? Int { self.videoWB = v }
+        if let v = ud.object(forKey: "cam_videoLoop") as? Int { self.videoLoop = v }
+        if let v = ud.object(forKey: "cam_buzzer") as? Int { self.buzzerLevel = v }
+        if let v = ud.object(forKey: "cam_autoOffMinutes") as? Int { self.autoOffMinutes = v }
+        if let v = ud.object(forKey: "cam_led") as? Bool { self.ledEnabled = v }
+
+        // Garantizar exclusividad mutua de sub-modos de foto si hubiesen quedado guardados juntos
+        if self.photoInterval > 0 {
+            self.timer = 0
+            self.photoBracketing = 0
+        } else if self.photoBracketing > 0 {
+            self.timer = 0
+            self.photoInterval = 0
+        }
+        self.updatePhotoSubMode()
+    }
+
+    public func syncSettingsToCamera() {
+        guard isConnected, sessionToken > 0 else { return }
+        print("🔄 Sincronizando ajustes guardados con la memoria de la cámara...")
+        sendCommand(msgId: 4611, param: "\(currentMode)")
+        sendCommand(msgId: 4872, param: "\(photoRes)")
+        sendCommand(msgId: 5172, param: "\(iso)")
+        sendCommand(msgId: 5171, param: "\(shutterRaw)")
+        sendCommand(msgId: 5169, param: "\(Int(ev * 2.0))")
+        sendCommand(msgId: 5168, param: "\(wb)")
+
+        // Desactivar explícitamente los sub-modos inactivos con param: 0 y activar el seleccionado:
+        if photoInterval > 0 {
+            sendCommand(msgId: 4866, param: "0")
+            sendCommand(msgId: 4918, param: "0")
+            sendCommand(msgId: 4929, param: "\(photoInterval)")
+        } else if photoBracketing > 0 {
+            sendCommand(msgId: 4866, param: "0")
+            sendCommand(msgId: 4929, param: "0")
+            sendCommand(msgId: 4918, param: "\(photoBracketing)")
+        } else if timer > 0 {
+            sendCommand(msgId: 4929, param: "0")
+            sendCommand(msgId: 4918, param: "0")
+            sendCommand(msgId: 4866, param: "\(timer)")
+        } else {
+            sendCommand(msgId: 4866, param: "0")
+            sendCommand(msgId: 4929, param: "0")
+            sendCommand(msgId: 4918, param: "0")
+        }
+
+        sendCommand(msgId: 4612, param: "\(videoRes)")
+        sendCommand(msgId: 5136, param: "\(videoWB)")
+        sendCommand(msgId: 5137, param: "\(Int(videoEV * 2.0))")
+
+        // Desactivar explícitamente los sub-modos de video inactivos y activar el seleccionado:
+        if videoShort > 0 {
+            sendCommand(msgId: 4621, param: "0")
+            sendCommand(msgId: 4916, param: "0")
+            sendCommand(msgId: 4618, param: "\(videoShort)")
+        } else if videoTimelapse > 0 {
+            sendCommand(msgId: 4618, param: "0")
+            sendCommand(msgId: 4916, param: "0")
+            sendCommand(msgId: 4621, param: "\(videoTimelapse)")
+        } else if videoSlowMo > 0 {
+            sendCommand(msgId: 4618, param: "0")
+            sendCommand(msgId: 4621, param: "0")
+            sendCommand(msgId: 4916, param: "2")
+        } else {
+            sendCommand(msgId: 4618, param: "0")
+            sendCommand(msgId: 4621, param: "0")
+            sendCommand(msgId: 4916, param: "0")
+        }
+
+        if videoLoop > 0 {
+            sendCommand(msgId: 4615, param: "\(videoLoop)")
+            sendCommand(msgId: 4614, param: "\(videoLoop)")
+        }
+        sendCommand(msgId: 6145, param: "\(buzzerLevel)")
+        sendCommand(msgId: 6151, param: "\(autoOffMinutes)")
+        sendCommand(msgId: 6156, param: "\(ledEnabled ? 1 : 0)")
+
+        // Enviar coordenadas GPS actuales al conectar con el nuevo formato 4917
+        DispatchQueue.main.async {
+            LocationManager.shared.syncCurrentLocationToCameraOnly()
+        }
+    }
+
+    private func updatePhotoSubMode() {
+        if photoInterval > 0 {
+            photoSubMode = 2
+        } else if photoBracketing > 0 {
+            photoSubMode = 4
+        } else if timer > 0 {
+            photoSubMode = 1
+        } else {
+            photoSubMode = 0
+        }
+    }
+
     // MARK: - Acciones y Ajustes de FOTO
 
     public func switchMode(_ mode: Int) {
+        if isIntervalRunning {
+            stopInterval()
+        }
+        UserDefaults.standard.set(mode, forKey: "cam_currentMode")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         sendCommand(msgId: 4611, param: "\(mode)")
         DispatchQueue.main.async {
             self.currentMode = mode
@@ -571,11 +882,41 @@ public class CameraManager: ObservableObject {
     }
 
     public func takePhoto() {
-        if timer > 0 {
+        if isIntervalRunning {
+            stopInterval()
+            return
+        }
+
+        if photoInterval > 0 {
+            // Asegurar que el registro 4929 esté activo en la cámara y disparar el intervalo con 5025
+            sendCommand(msgId: 4929, param: "\(photoInterval)")
+            lastStatusMessage = "Iniciando intervalómetro (5025)..."
+            sendCommand(msgId: 5025, param: nil)
+        } else if photoBracketing > 0 {
+            // Horquillado AEB / HDR: Con surroundexp activo, se inicia con 5029 (AMBA_MSGID_START_PHOTO_BRACKETING)
+            lastStatusMessage = "Disparando ráfaga HDR (5029)..."
+            sendCommand(msgId: 5029, param: nil)
+        } else if timer > 0 {
+            // Temporizador nativo por hardware: Únicamente el Timer usa 4868 (PHOTO_LONGPRESS) para arrancar beeper y cuenta atrás
+            lastStatusMessage = "Temporizador (\(timer)s) iniciado en la cámara..."
             sendCommand(msgId: 4868, param: nil)
         } else {
+            // Foto estándar inmediata
             sendCommand(msgId: 4864, param: nil)
         }
+    }
+
+    public func cancelCountdown() {
+        // Mantenido para compatibilidad
+    }
+
+    public func stopInterval() {
+        isIntervalRunning = false
+        // 1. Enviar orden de cierre de sesión de intervalo (5025)
+        sendCommand(msgId: 5025, param: nil)
+        // 2. Desactivar explícitamente el registro de intervalómetro en la memoria de la cámara (4929: 0)
+        sendCommand(msgId: 4929, param: "0")
+        lastStatusMessage = "Intervalómetro detenido."
     }
 
     // NOTA TÉCNICA: La Xiaomi Mi Sphere 360 emite el flujo RTSP en rtsp://192.168.42.1/live de manera
@@ -607,16 +948,23 @@ public class CameraManager: ObservableObject {
     }
 
     public func setPhotoResolution(_ val: Int) {
+        UserDefaults.standard.set(val, forKey: "cam_photoRes")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         sendCommand(msgId: 4872, param: "\(val)")
         DispatchQueue.main.async { self.photoRes = val }
     }
 
     public func setISO(_ val: Int) {
+        UserDefaults.standard.set(val, forKey: "cam_iso")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         sendCommand(msgId: 5172, param: "\(val)")
         DispatchQueue.main.async { self.iso = val }
     }
 
     public func setShutter(_ rawVal: Int, label: String) {
+        UserDefaults.standard.set(rawVal, forKey: "cam_shutterRaw")
+        UserDefaults.standard.set(label, forKey: "cam_shutter")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         sendCommand(msgId: 5171, param: "\(rawVal)")
         DispatchQueue.main.async {
             self.shutterRaw = rawVal
@@ -626,36 +974,91 @@ public class CameraManager: ObservableObject {
 
     public func setEV(_ val: Double) {
         let param = Int(val * 2.0)
+        UserDefaults.standard.set(val, forKey: "cam_ev")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         sendCommand(msgId: 5169, param: "\(param)")
         DispatchQueue.main.async { self.ev = val }
     }
 
     public func setWB(_ val: Int) {
+        UserDefaults.standard.set(val, forKey: "cam_wb")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         sendCommand(msgId: 5168, param: "\(val)")
         DispatchQueue.main.async { self.wb = val }
     }
 
     public func setTimer(_ val: Int) {
-        sendCommand(msgId: 4866, param: "\(val)")
+        if isIntervalRunning {
+            stopInterval()
+        }
+        UserDefaults.standard.set(val, forKey: "cam_timer")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        lastStatusMessage = "Enviando Timer (\(val)s) con msgId 4866..."
+        if val > 0 {
+            // Desactivar explícitamente en la cámara los otros sub-modos (Intervalo y HDR)
+            self.photoInterval = 0
+            self.photoBracketing = 0
+            UserDefaults.standard.set(0, forKey: "cam_photoInterval")
+            UserDefaults.standard.set(0, forKey: "cam_photoBracketing")
+            sendCommand(msgId: 4929, param: "0")
+            sendCommand(msgId: 4918, param: "0")
+            sendCommand(msgId: 4866, param: "\(val)")
+        } else {
+            sendCommand(msgId: 4866, param: "0")
+        }
         DispatchQueue.main.async {
             self.timer = val
-            self.photoSubMode = val > 0 ? 1 : 0
+            self.updatePhotoSubMode()
         }
     }
 
     public func setPhotoInterval(_ val: Int) {
-        sendCommand(msgId: 4929, param: "\(val)")
+        if isIntervalRunning {
+            stopInterval()
+        }
+        UserDefaults.standard.set(val, forKey: "cam_photoInterval")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        lastStatusMessage = "Enviando Intervalo (\(val)s) con msgId 4929..."
+        if val > 0 {
+            // Desactivar explícitamente en la cámara los otros sub-modos (Timer y HDR)
+            self.timer = 0
+            self.photoBracketing = 0
+            UserDefaults.standard.set(0, forKey: "cam_timer")
+            UserDefaults.standard.set(0, forKey: "cam_photoBracketing")
+            sendCommand(msgId: 4866, param: "0")
+            sendCommand(msgId: 4918, param: "0")
+            sendCommand(msgId: 4929, param: "\(val)")
+        } else {
+            sendCommand(msgId: 4929, param: "0")
+        }
         DispatchQueue.main.async {
             self.photoInterval = val
-            self.photoSubMode = val > 0 ? 2 : 0
+            self.updatePhotoSubMode()
         }
     }
 
     public func setPhotoBracketing(_ val: Int) {
-        sendCommand(msgId: 4918, param: "\(val)")
+        if isIntervalRunning {
+            stopInterval()
+        }
+        UserDefaults.standard.set(val, forKey: "cam_photoBracketing")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        lastStatusMessage = "Enviando HDR (\(val)) con msgId 4918..."
+        if val > 0 {
+            // Desactivar explícitamente en la cámara los otros sub-modos (Timer e Intervalo)
+            self.timer = 0
+            self.photoInterval = 0
+            UserDefaults.standard.set(0, forKey: "cam_timer")
+            UserDefaults.standard.set(0, forKey: "cam_photoInterval")
+            sendCommand(msgId: 4866, param: "0")
+            sendCommand(msgId: 4929, param: "0")
+            sendCommand(msgId: 4918, param: "\(val)")
+        } else {
+            sendCommand(msgId: 4918, param: "0")
+        }
         DispatchQueue.main.async {
             self.photoBracketing = val
-            self.photoSubMode = val > 0 ? 4 : 0
+            self.updatePhotoSubMode()
         }
     }
 
@@ -665,17 +1068,47 @@ public class CameraManager: ObservableObject {
         if isRecording {
             sendCommand(msgId: 514, param: nil)
         } else {
-            sendCommand(msgId: 5028, param: nil)
+            if videoShort > 0 {
+                // Video corto (micro): 4620 (AMBA_MSGID_START_VIDEO_MICRO)
+                lastStatusMessage = "Iniciando video corto (4620)..."
+                sendCommand(msgId: 4620, param: nil)
+            } else if videoTimelapse > 0 {
+                // Video con retardo / timelapse: 4623 (AMBA_MSGID_START_VIDEO_DELAY)
+                lastStatusMessage = "Iniciando video timelapse (4623)..."
+                sendCommand(msgId: 4623, param: nil)
+            } else if videoSlowMo > 0 {
+                // Video lento (Slow Motion): 5028 (AMBA_MSGID_START_VIDEO_SLOW)
+                lastStatusMessage = "Iniciando cámara lenta (5028)..."
+                sendCommand(msgId: 5028, param: nil)
+            } else {
+                // Video normal estándar: 513 (AMBA_MSGID_START_VIDEO_NORMAL)
+                lastStatusMessage = "Iniciando grabación de video (513)..."
+                sendCommand(msgId: 513, param: nil)
+            }
         }
     }
 
     public func setVideoResolution(_ val: Int) {
+        UserDefaults.standard.set(val, forKey: "cam_videoRes")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         sendCommand(msgId: 4612, param: "\(val)")
         DispatchQueue.main.async { self.videoRes = val }
     }
 
     public func setVideoShort(_ val: Int) {
-        sendCommand(msgId: 4618, param: "\(val)")
+        UserDefaults.standard.set(val, forKey: "cam_videoShort")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        if val > 0 {
+            self.videoTimelapse = 0
+            self.videoSlowMo = 0
+            UserDefaults.standard.set(0, forKey: "cam_videoTimelapse")
+            UserDefaults.standard.set(0, forKey: "cam_videoSlowMo")
+            sendCommand(msgId: 4621, param: "0")
+            sendCommand(msgId: 4916, param: "0")
+            sendCommand(msgId: 4618, param: "\(val)")
+        } else {
+            sendCommand(msgId: 4618, param: "0")
+        }
         DispatchQueue.main.async {
             self.videoShort = val
             self.videoSubMode = val > 0 ? 1 : 0
@@ -683,7 +1116,19 @@ public class CameraManager: ObservableObject {
     }
 
     public func setVideoTimelapse(_ val: Int) {
-        sendCommand(msgId: 4621, param: "\(val)")
+        UserDefaults.standard.set(val, forKey: "cam_videoTimelapse")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        if val > 0 {
+            self.videoShort = 0
+            self.videoSlowMo = 0
+            UserDefaults.standard.set(0, forKey: "cam_videoShort")
+            UserDefaults.standard.set(0, forKey: "cam_videoSlowMo")
+            sendCommand(msgId: 4618, param: "0")
+            sendCommand(msgId: 4916, param: "0")
+            sendCommand(msgId: 4621, param: "\(val)")
+        } else {
+            sendCommand(msgId: 4621, param: "0")
+        }
         DispatchQueue.main.async {
             self.videoTimelapse = val
             self.videoSubMode = val > 0 ? 2 : 0
@@ -691,7 +1136,19 @@ public class CameraManager: ObservableObject {
     }
 
     public func setVideoSlowMo(_ val: Int) {
-        sendCommand(msgId: 4916, param: "\(val)")
+        UserDefaults.standard.set(val, forKey: "cam_videoSlowMo")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        if val > 0 {
+            self.videoShort = 0
+            self.videoTimelapse = 0
+            UserDefaults.standard.set(0, forKey: "cam_videoShort")
+            UserDefaults.standard.set(0, forKey: "cam_videoTimelapse")
+            sendCommand(msgId: 4618, param: "0")
+            sendCommand(msgId: 4621, param: "0")
+            sendCommand(msgId: 4916, param: "2")
+        } else {
+            sendCommand(msgId: 4916, param: "0")
+        }
         DispatchQueue.main.async {
             self.videoSlowMo = val
             self.videoSubMode = val > 0 ? 4 : 0
@@ -700,20 +1157,48 @@ public class CameraManager: ObservableObject {
 
     public func setVideoEV(_ val: Double) {
         let param = Int(val * 2.0)
+        UserDefaults.standard.set(val, forKey: "cam_videoEV")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         sendCommand(msgId: 5137, param: "\(param)")
         DispatchQueue.main.async { self.videoEV = val }
     }
 
     public func setVideoWB(_ val: Int) {
+        UserDefaults.standard.set(val, forKey: "cam_videoWB")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         sendCommand(msgId: 5136, param: "\(val)")
         DispatchQueue.main.async { self.videoWB = val }
     }
 
     public func setVideoLoop(_ val: Int) {
+        UserDefaults.standard.set(val, forKey: "cam_videoLoop")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
         // Enviar tanto 4615 como 4614 según la variante de firmware
         sendCommand(msgId: 4615, param: "\(val)")
         sendCommand(msgId: 4614, param: "\(val)")
         DispatchQueue.main.async { self.videoLoop = val }
+    }
+
+    public func setAutoTurnOff(_ val: Int) {
+        UserDefaults.standard.set(val, forKey: "cam_autoOffMinutes")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        sendCommand(msgId: 6151, param: "\(val)")
+        DispatchQueue.main.async { self.autoOffMinutes = val }
+    }
+
+    public func setBuzzer(_ val: Int) {
+        UserDefaults.standard.set(val, forKey: "cam_buzzer")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        sendCommand(msgId: 6145, param: "\(val)")
+        DispatchQueue.main.async { self.buzzerLevel = val }
+    }
+
+    public func setLED(_ val: Bool) {
+        let p = val ? 1 : 0
+        UserDefaults.standard.set(val, forKey: "cam_led")
+        UserDefaults.standard.set(true, forKey: "cam_hasSavedSettings")
+        sendCommand(msgId: 6156, param: "\(p)")
+        DispatchQueue.main.async { self.ledEnabled = val }
     }
 
     public func fetchWiFiSettings() {
@@ -757,9 +1242,15 @@ public class CameraManager: ObservableObject {
     // MARK: - GPS y Hardware
 
     public func setGPS(latitude: Double, longitude: Double, altitude: Double) {
-        guard isConnected else { return }
-        let gpsString = String(format: "%.6f,%.6f,%.1f", latitude, longitude, altitude)
-        sendCommand(msgId: 4917, param: gpsString)
+        guard isConnected, sessionToken > 0 else { return }
+        // Formato oficial Ambarella / Mi Sphere verificado en tcpdump (llaves separadas como String)
+        let packet: [String: Any] = [
+            "msg_id": 4917,
+            "lat": String(format: "%.6f", latitude),
+            "lon": String(format: "%.6f", longitude),
+            "alt": String(format: "%.6f", altitude)
+        ]
+        sendCustomPacket(packet, msgId: 4917)
     }
 
     public func powerOffCamera() {

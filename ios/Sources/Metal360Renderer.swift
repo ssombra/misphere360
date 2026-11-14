@@ -36,6 +36,7 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
     @Published public var pitch: Float = 0.0
     @Published public var fovDeg: Float = 85.0
     @Published public var isLutLoaded: Bool = false
+    @Published public var isExpanded: Bool = false
 
     private var device: MTLDevice?
     private var commandQueue: MTLCommandQueue?
@@ -61,7 +62,7 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         var aspect: Float
     }
 
-    private override init() {
+    public override init() {
         super.init()
         setupMetal()
         loadFactoryLUT()
@@ -254,6 +255,15 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         }
     }
 
+    public func handlePinch(scale: CGFloat) {
+        guard scale > 0 else { return }
+        let newFov = fovDeg / Float(scale)
+        fovDeg = max(35.0, min(115.0, newFov))
+        DispatchQueue.main.async { [weak self] in
+            self?.mtkView?.setNeedsDisplay()
+        }
+    }
+
     public func resetOrientation() {
         yaw = 0.0
         pitch = 0.0
@@ -265,7 +275,9 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
 
     // MARK: - MTKViewDelegate
 
-    public func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    public func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        view.setNeedsDisplay()
+    }
 
     public func draw(in view: MTKView) {
         guard let drawable = view.currentDrawable,

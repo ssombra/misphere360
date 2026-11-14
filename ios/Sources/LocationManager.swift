@@ -103,8 +103,8 @@ public class LocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             }
         }
 
-        // Si no está en el historial (o fue tomada antes), usar la ubicación actual si está disponible
-        return clManager.location
+        // No inyectar ubicación actual a fotos antiguas o tomadas sin la app conectada
+        return nil
     }
 
     private func parseDateFromFilename(_ filename: String) -> Date? {
@@ -138,6 +138,11 @@ public class LocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         if let data = try? JSONEncoder().encode(shotHistory) {
             UserDefaults.standard.set(data, forKey: historyKey)
         }
+    }
+
+    public func syncCurrentLocationToCameraOnly() {
+        guard let loc = clManager.location, loc.horizontalAccuracy >= 0 else { return }
+        sendLocationToCamera(loc)
     }
 
     public func forceSyncGPSWithCamera() {

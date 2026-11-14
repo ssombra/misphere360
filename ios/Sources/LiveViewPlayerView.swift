@@ -69,48 +69,58 @@ public struct LiveViewPlayerView: View {
             if player.isPlaying {
                 VStack {
                     Spacer()
-                    HStack {
-                        // Selector de proyección
-                        HStack(spacing: 2) {
-                            ForEach(Metal360Renderer.DisplayMode.allCases) { m in
-                                Button {
-                                    let impact = UIImpactFeedbackGenerator(style: .light)
-                                    impact.impactOccurred()
-                                    renderer.mode = m
-                                } label: {
-                                    Text(m.title)
-                                        .font(.system(size: 9.5, weight: renderer.mode == m ? .bold : .medium))
-                                        .foregroundColor(renderer.mode == m ? .black : .white.opacity(0.75))
-                                        .padding(.horizontal, 7)
-                                        .padding(.vertical, 3)
-                                        .background(renderer.mode == m ? Color.white : Color.clear)
-                                        .clipShape(Capsule())
+                    HStack(alignment: .bottom) {
+                        if !renderer.isExpanded {
+                            // Selector de proyección (solo en modo compacto)
+                            HStack(spacing: 2) {
+                                ForEach(Metal360Renderer.DisplayMode.allCases) { m in
+                                    Button {
+                                        let impact = UIImpactFeedbackGenerator(style: .light)
+                                        impact.impactOccurred()
+                                        renderer.mode = m
+                                    } label: {
+                                        Text(m.title)
+                                            .font(.system(size: 9.5, weight: renderer.mode == m ? .bold : .medium))
+                                            .foregroundColor(renderer.mode == m ? .black : .white.opacity(0.75))
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(renderer.mode == m ? Color.white : Color.clear)
+                                            .clipShape(Capsule())
+                                    }
                                 }
                             }
+                            .padding(2)
+                            .background(.ultraThinMaterial)
+                            .background(Color.black.opacity(0.50))
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule().stroke(Color.white.opacity(0.20), lineWidth: 0.5)
+                            )
                         }
-                        .padding(2)
-                        .background(.ultraThinMaterial)
-                        .background(Color.black.opacity(0.50))
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule().stroke(Color.white.opacity(0.20), lineWidth: 0.5)
-                        )
 
                         Spacer()
 
-                        // Sugerencia de gesto
-                        if renderer.mode == .interactive360 {
-                            HStack(spacing: 4) {
-                                Image(systemName: "hand.draw")
-                                    .font(.system(size: 9))
-                                Text("Arrastra 360°")
-                                    .font(.system(size: 9.5, weight: .medium))
+                        // Botón de Expansión / Reducción del visor
+                        Button {
+                            let impact = UIImpactFeedbackGenerator(style: .medium)
+                            impact.impactOccurred()
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                renderer.isExpanded.toggle()
+                                if renderer.isExpanded {
+                                    renderer.mode = .interactive360
+                                }
                             }
-                            .foregroundColor(.white.opacity(0.75))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.black.opacity(0.45))
-                            .clipShape(Capsule())
+                        } label: {
+                            Image(systemName: renderer.isExpanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 28, height: 28)
+                                .background(.ultraThinMaterial)
+                                .background(Color.black.opacity(0.50))
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle().stroke(Color.white.opacity(0.20), lineWidth: 0.5)
+                                )
                         }
                     }
                     .padding(.horizontal, 10)
@@ -130,10 +140,12 @@ public struct LiveViewPlayerView: View {
 // MARK: - Puente UIViewRepresentable con MTKView (Metal)
 
 struct Metal360ViewRepresentable: UIViewRepresentable {
+    var renderer: Metal360Renderer = .shared
+
     func makeUIView(context: Context) -> MTKView {
         let mtkView = MTKView()
         mtkView.device = MTLCreateSystemDefaultDevice()
-        mtkView.delegate = Metal360Renderer.shared
+        mtkView.delegate = renderer
         mtkView.framebufferOnly = true
         mtkView.colorPixelFormat = .bgra8Unorm
         mtkView.contentScaleFactor = min(UIScreen.main.scale, 2.0)
@@ -142,13 +154,19 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
         mtkView.enableSetNeedsDisplay = true
         mtkView.backgroundColor = .black
 
-        Metal360Renderer.shared.mtkView = mtkView
+        renderer.mtkView = mtkView
 
         // Gesto de arrastre para explorar en 360°
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        pan.delegate = context.coordinator
         mtkView.addGestureRecognizer(pan)
 
-        // Doble toque para centrar vista
+        // Gesto de pellizco para zoom in / out
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
+        pinch.delegate = context.coordinator
+        mtkView.addGestureRecognizer(pinch)
+
+        // Doble toque para centrar vista y restablecer zoom
         let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         mtkView.addGestureRecognizer(doubleTap)
@@ -159,11 +177,16 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
     func updateUIView(_ uiView: MTKView, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(renderer: renderer)
     }
 
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let renderer: Metal360Renderer
         private var lastLocation: CGPoint = .zero
+
+        init(renderer: Metal360Renderer) {
+            self.renderer = renderer
+        }
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             let loc = gesture.translation(in: gesture.view)
@@ -173,14 +196,25 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
                 let dx = loc.x - lastLocation.x
                 let dy = loc.y - lastLocation.y
                 lastLocation = loc
-                Metal360Renderer.shared.handlePan(deltaX: dx, deltaY: dy)
+                renderer.handlePan(deltaX: dx, deltaY: dy)
+            }
+        }
+
+        @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            if gesture.state == .changed {
+                renderer.handlePinch(scale: gesture.scale)
+                gesture.scale = 1.0
             }
         }
 
         @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
             let impact = UIImpactFeedbackGenerator(style: .medium)
             impact.impactOccurred()
-            Metal360Renderer.shared.resetOrientation()
+            renderer.resetOrientation()
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            return true
         }
     }
 }

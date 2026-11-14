@@ -179,18 +179,33 @@ struct GalleryView: View {
                 datePickerSheetView
             }
             .fullScreenCover(item: $previewItem) { item in
-                PhotoPreviewView(
-                    item: item,
-                    onDownloadRequested: { mode in
-                        downloader.saveMediaToCameraRoll(item: item, mode: mode) { ok, msg in
-                            alertMessage = msg
-                            showAlert = true
+                if item.isVideo {
+                    VideoPreviewView(
+                        item: item,
+                        onDownloadRequested: { mode in
+                            downloader.saveMediaToCameraRoll(item: item, mode: mode) { ok, msg in
+                                alertMessage = msg
+                                showAlert = true
+                            }
+                        },
+                        onDeleteRequested: {
+                            deleteSingleFile(item)
                         }
-                    },
-                    onDeleteRequested: {
-                        deleteSingleFile(item)
-                    }
-                )
+                    )
+                } else {
+                    PhotoPreviewView(
+                        item: item,
+                        onDownloadRequested: { mode in
+                            downloader.saveMediaToCameraRoll(item: item, mode: mode) { ok, msg in
+                                alertMessage = msg
+                                showAlert = true
+                            }
+                        },
+                        onDeleteRequested: {
+                            deleteSingleFile(item)
+                        }
+                    )
+                }
             }
             .alert(isPresented: $showAlert) {
                 Alert(title: Text("Aviso"), message: Text(alertMessage), dismissButton: .default(Text("OK")))

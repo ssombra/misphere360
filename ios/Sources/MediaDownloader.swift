@@ -46,12 +46,10 @@ public class MediaDownloader: ObservableObject {
         }
     }
 
-    /// Descarga directamente el archivo original de la cámara a un archivo temporal local
-    public func downloadToTemporaryFile(item: SDFileItem, completion: @escaping (URL?) -> Void) {
+    private func buildCandidateURLs(for item: SDFileItem) -> [URL] {
         let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let nameVariants = filenameVariants(for: item.filename)
 
-        // Priorizar prefijos conocidos directos
         var prefixes = ["/DCIM", "", "/SD0/DCIM", "/tmp/SD0/DCIM"]
         if let remembered = rememberedWorkingPrefix {
             prefixes.removeAll(where: { $0 == remembered })
@@ -67,6 +65,58 @@ public class MediaDownloader: ObservableObject {
                 }
             }
         }
+        return candidateURLs
+    }
+
+    /// Resuelve la URL HTTP directa en la cámara (mediante HEAD) para streaming de video sin descargar todo el archivo
+    public func resolveMediaURL(item: SDFileItem, completion: @escaping (URL?, Int64?) -> Void) {
+        let candidates = buildCandidateURLs(for: item)
+        probeNextURL(candidates: candidates) { [weak self] foundURL, contentLength in
+            if let foundURL = foundURL {
+                completion(foundURL, contentLength)
+            } else {
+                let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                self?.discoverCherokeeExactLink(folder: cleanFolder, filename: item.filename) { discURL in
+                    completion(discURL, nil)
+                }
+            }
+        }
+    }
+
+    private func probeNextURL(candidates: [URL], completion: @escaping (URL?, Int64?) -> Void) {
+        guard let currentURL = candidates.first else {
+            completion(nil, nil)
+            return
+        }
+        let remaining = Array(candidates.dropFirst())
+        var req = URLRequest(url: currentURL)
+        req.httpMethod = "HEAD"
+        req.timeoutInterval = 4.0
+
+        URLSession.shared.dataTask(with: req) { [weak self] _, response, error in
+            if let http = response as? HTTPURLResponse, http.statusCode == 200, error == nil {
+                let pathStr = currentURL.path
+                if pathStr.contains("/DCIM/") {
+                    self?.rememberedWorkingPrefix = "/DCIM"
+                } else if pathStr.contains("/SD0/DCIM/") {
+                    self?.rememberedWorkingPrefix = "/SD0/DCIM"
+                } else if pathStr.contains("/tmp/SD0/DCIM/") {
+                    self?.rememberedWorkingPrefix = "/tmp/SD0/DCIM"
+                } else {
+                    self?.rememberedWorkingPrefix = ""
+                }
+                let size = http.expectedContentLength > 0 ? http.expectedContentLength : nil
+                completion(currentURL, size)
+            } else {
+                self?.probeNextURL(candidates: remaining, completion: completion)
+            }
+        }.resume()
+    }
+
+    /// Descarga directamente el archivo original de la cámara a un archivo temporal local
+    public func downloadToTemporaryFile(item: SDFileItem, completion: @escaping (URL?) -> Void) {
+        let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let candidateURLs = buildCandidateURLs(for: item)
 
         // Iniciar descarga inmediata con las URLs directas más probables sin demoras de sondeo
         self.downloadNextCandidate(candidates: candidateURLs, item: item) { [weak self] resultURL in
