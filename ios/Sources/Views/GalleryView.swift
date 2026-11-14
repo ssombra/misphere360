@@ -430,6 +430,7 @@ struct GalleryView: View {
                                                     expandedDays.remove(dayID)
                                                 } else {
                                                     expandedDays.insert(dayID)
+                                                    verifyDayFoldersInBackground(items: day.items)
                                                 }
                                             }
                                         }
@@ -459,6 +460,7 @@ struct GalleryView: View {
                                         expandedDays.remove(section.title)
                                     } else {
                                         expandedDays.insert(section.title)
+                                        verifyDayFoldersInBackground(items: section.items)
                                     }
                                 }
                             }
@@ -932,32 +934,62 @@ struct GalleryView: View {
             return
         }
 
-        self.isLoading = true
-        self.allFiles = []
+        // 1. Mostrar inmediatamente todo lo que ya esté en el índice en caché
+        var cachedFiles: [SDFileItem] = []
+        var uncachedFolders: [String] = []
+        for folder in targets {
+            if let items = SDFolderIndexCache.shared.items(for: folder) {
+                cachedFiles.append(contentsOf: items)
+            } else {
+                uncachedFolders.append(folder)
+            }
+        }
 
-        // Cargar inmediatamente la primera carpeta para renderizar en <0.3s
+        if !cachedFiles.isEmpty {
+            self.allFiles = cachedFiles
+            self.isLoading = false
+        } else {
+            self.isLoading = true
+            self.allFiles = []
+        }
+
+        // 2. Re-consultar siempre la carpeta más reciente (por fotos/videos nuevos), y luego solo las no cacheadas
         camera.listFilesInFolder(first) { recentItems in
-            self.allFiles = recentItems
+            self.mergeFolderItems(recentItems, for: first)
             self.isLoading = false
 
-            // Cargar secuencialmente solo las demás carpetas incluidas en el filtro activo
-            let remaining = Array(targets.dropFirst())
-            self.loadRemainingFoldersSequentially(remaining: remaining)
+            let remainingUncached = uncachedFolders.filter { $0 != first }
+            self.loadRemainingFoldersSequentially(remaining: remainingUncached)
         }
     }
 
     private func loadRemainingFoldersSequentially(remaining: [String]) {
         guard let nextFolder = remaining.first else { return }
-        camera.listFilesInFolder(nextFolder) { olderItems in
-            if !olderItems.isEmpty {
-                var current = self.allFiles
-                for item in olderItems where !current.contains(where: { $0.id == item.id }) {
-                    current.append(item)
-                }
-                self.allFiles = current.sorted(by: { $0.filename > $1.filename })
-            }
+        camera.listFilesInFolder(nextFolder) { items in
+            self.mergeFolderItems(items, for: nextFolder)
             self.loadRemainingFoldersSequentially(remaining: Array(remaining.dropFirst()))
         }
+    }
+
+    private func verifyDayFoldersInBackground(items: [SDFileItem]) {
+        guard activeTab == .camera, camera.isConnected else { return }
+        let folders = Array(Set(items.map { $0.folder }))
+        for folder in folders {
+            camera.listFilesInFolder(folder) { freshItems in
+                let cachedIDs = Set((SDFolderIndexCache.shared.items(for: folder) ?? []).map { $0.id })
+                let freshIDs = Set(freshItems.map { $0.id })
+                if cachedIDs != freshIDs {
+                    self.mergeFolderItems(freshItems, for: folder)
+                }
+            }
+        }
+    }
+
+    private func mergeFolderItems(_ items: [SDFileItem], for folder: String) {
+        SDFolderIndexCache.shared.setItems(items, for: folder)
+        var updated = self.allFiles.filter { $0.folder != folder }
+        updated.append(contentsOf: items)
+        self.allFiles = updated
     }
 
     private func deleteSingleFile(_ item: SDFileItem) {
@@ -970,6 +1002,7 @@ struct GalleryView: View {
         camera.deleteSDFile(folder: item.folder, filename: item.filename) { ok in
             if ok {
                 allFiles.removeAll(where: { $0.id == item.id })
+                SDFolderIndexCache.shared.removeItem(id: item.id, folder: item.folder)
                 alertMessage = "Archivo eliminado de la tarjeta microSD."
             } else {
                 alertMessage = "No se pudo borrar el archivo."
@@ -1007,6 +1040,7 @@ struct GalleryView: View {
             camera.deleteSDFile(folder: first.folder, filename: first.filename) { ok in
                 if ok {
                     self.allFiles.removeAll(where: { $0.id == first.id })
+                    SDFolderIndexCache.shared.removeItem(id: first.id, folder: first.folder)
                 }
                 deleteNext(items: Array(items.dropFirst()))
             }
@@ -1134,5 +1168,51 @@ struct StorageInfoSheetView: View {
             return "\(hrs)h \(remMins)m (\(seconds)s)"
         }
         return "\(mins) min (\(seconds)s)"
+    }
+}
+
+private final class SDFolderIndexCache {
+    static let shared = SDFolderIndexCache()
+
+    private let queue = DispatchQueue(label: "com.misphere.sdFolderIndexCache", attributes: .concurrent)
+    private let fileURL: URL
+    private var folders: [String: [SDFileItem]] = [:]
+
+    private init() {
+        let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        self.fileURL = cachesDir.appendingPathComponent("sd_folder_index.json")
+        if let data = try? Data(contentsOf: fileURL),
+           let decoded = try? JSONDecoder().decode([String: [SDFileItem]].self, from: data) {
+            self.folders = decoded
+        }
+    }
+
+    func items(for folder: String) -> [SDFileItem]? {
+        queue.sync {
+            folders[folder]
+        }
+    }
+
+    func setItems(_ items: [SDFileItem], for folder: String) {
+        queue.async(flags: .barrier) {
+            self.folders[folder] = items
+            self.saveToDiskLocked()
+        }
+    }
+
+    func removeItem(id: String, folder: String) {
+        queue.async(flags: .barrier) {
+            guard var current = self.folders[folder] else { return }
+            let originalCount = current.count
+            current.removeAll { $0.id == id }
+            guard current.count != originalCount else { return }
+            self.folders[folder] = current
+            self.saveToDiskLocked()
+        }
+    }
+
+    private func saveToDiskLocked() {
+        guard let data = try? JSONEncoder().encode(folders) else { return }
+        try? data.write(to: fileURL, options: .atomic)
     }
 }

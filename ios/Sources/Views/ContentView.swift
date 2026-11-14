@@ -22,6 +22,7 @@ struct ContentView: View {
     @ObservedObject private var rtspPlayer = NativeRTSPPlayer.shared
     @ObservedObject private var renderer = Metal360Renderer.shared
 
+    private let showDebugStatusBanner = false
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0) // #FF6700
     private let darkBg = Color(red: 0.05, green: 0.06, blue: 0.09)
     private let cardBg = Color(red: 0.10, green: 0.12, blue: 0.18)
@@ -37,8 +38,8 @@ struct ContentView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 6)
 
-                // Diagnóstico en vivo de comandos y registros de la cámara
-                if camera.isConnected && !camera.lastStatusMessage.isEmpty {
+                // Diagnóstico en vivo de comandos y registros de la cámara (oculto por defecto; cambiar a true para debug)
+                if showDebugStatusBanner && camera.isConnected && !camera.lastStatusMessage.isEmpty {
                     Text(camera.lastStatusMessage)
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundColor(.yellow)
@@ -154,8 +155,8 @@ struct ContentView: View {
             .background(Color.white.opacity(0.10))
             .clipShape(Capsule())
 
-            // Estado de Batería
-            if camera.isConnected {
+            // Estado de Batería (oculto hasta recibir lectura real de la cámara)
+            if camera.isConnected && camera.hasBatteryInfo {
                 HStack(spacing: 4) {
                     Image(systemName: camera.isCharging ? "battery.100.bolt" : "battery.75")
                         .font(.system(size: 13))

@@ -4,7 +4,7 @@ import Combine
 import UIKit
 
 /// Modelo de archivo en la tarjeta microSD de la cámara
-public struct SDFileItem: Identifiable, Hashable {
+public struct SDFileItem: Identifiable, Hashable, Codable {
     public var id: String { "\(folder)/\(filename)" }
     public let folder: String
     public let filename: String
@@ -29,6 +29,7 @@ public class CameraManager: ObservableObject {
     @Published public var isConnecting = false
     @Published public var sessionToken: Int = 0
     @Published public var batteryPercent: Int = 0
+    @Published public var hasBatteryInfo = false
     @Published public var isCharging = false
     @Published public var isRecording = false
     @Published public var currentMode: Int = 1 // 1: Foto, 0: Video
@@ -251,6 +252,7 @@ public class CameraManager: ObservableObject {
             self.isConnecting = false
             self.sessionToken = 0
             self.isIntervalRunning = false
+            self.hasBatteryInfo = false
         }
     }
 
@@ -739,6 +741,7 @@ public class CameraManager: ObservableObject {
         }
         self.isCharging = isCharging
         self.batteryPercent = pct
+        self.hasBatteryInfo = true
     }
 
     public func fetchStorageStatus() {
