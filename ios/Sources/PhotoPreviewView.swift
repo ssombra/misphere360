@@ -13,6 +13,9 @@ public struct PhotoPreviewView: View {
     @State private var isLoading: Bool
     @State private var loadingMessage = "Cargando foto desde la cámara..."
     @State private var enableGyro = false
+    @State private var projectionMode: PhotoProjectionMode = .normal
+    @State private var panoScale: CGFloat = 1.0
+    @GestureState private var panoMagnifyBy: CGFloat = 1.0
     @State private var showDeleteConfirm = false
     @State private var showInfoSheet = false
     @State private var downloadedFileSize: Int64? = nil
@@ -48,10 +51,32 @@ public struct PhotoPreviewView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // 1. Visor WebGL 360° interactivo
+            // 1. Visor WebGL 360° interactivo o Pano 360
             if let img = stitchedImage {
-                Web360Viewer(image: img, enableMotion: enableGyro)
-                    .ignoresSafeArea()
+                if projectionMode == .pano360 {
+                    Image(uiImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .scaleEffect(max(1.0, min(4.0, panoScale * panoMagnifyBy)))
+                        .gesture(
+                            MagnificationGesture()
+                                .updating($panoMagnifyBy) { value, state, _ in
+                                    state = value
+                                }
+                                .onEnded { value in
+                                    panoScale = max(1.0, min(4.0, panoScale * value))
+                                }
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                panoScale = 1.0
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Web360Viewer(image: img, enableMotion: enableGyro, projectionMode: projectionMode)
+                        .ignoresSafeArea()
+                }
             } else if let err = errorMessage {
                 VStack(spacing: 16) {
                     Image(systemName: "exclamationmark.triangle")
@@ -100,7 +125,7 @@ public struct PhotoPreviewView: View {
                     Spacer()
 
                     // Botón Giroscopio / Táctil (Derecha, solo ícono redondo)
-                    if stitchedImage != nil {
+                    if stitchedImage != nil && projectionMode != .pano360 {
                         Button {
                             let impact = UIImpactFeedbackGenerator(style: .light)
                             impact.impactOccurred()
@@ -127,7 +152,7 @@ public struct PhotoPreviewView: View {
 
                 // 3. Botones Flotantes Inferiores (Estilo Apple translúcido e íconos blancos)
                 if stitchedImage != nil {
-                    HStack(spacing: 28) {
+                    HStack(spacing: 22) {
                         // 1. Borrar con confirmación
                         Button {
                             showDeleteConfirm = true
@@ -186,6 +211,43 @@ public struct PhotoPreviewView: View {
                                 .clipShape(Circle())
                                 .overlay(
                                     Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                                )
+                                .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
+                        }
+
+                        // 4. Modo de proyección 360°
+                        Menu {
+                            Section("Modo de visualización") {
+                                ForEach(PhotoProjectionMode.allCases) { mode in
+                                    Button {
+                                        let impact = UIImpactFeedbackGenerator(style: .light)
+                                        impact.impactOccurred()
+                                        projectionMode = mode
+                                        if mode == .pano360 {
+                                            panoScale = 1.0
+                                        }
+                                    } label: {
+                                        if projectionMode == mode {
+                                            Label(mode.rawValue, systemImage: "checkmark")
+                                        } else {
+                                            Label(mode.rawValue, systemImage: mode.systemImage)
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: projectionMode.systemImage)
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(projectionMode == .normal ? .white : brandOrange)
+                                .frame(width: 50, height: 50)
+                                .background(.ultraThinMaterial)
+                                .background(Color.black.opacity(0.45))
+                                .clipShape(Circle())
+                                .overlay(
+                                    Circle().stroke(
+                                        projectionMode == .normal ? Color.white.opacity(0.18) : brandOrange.opacity(0.6),
+                                        lineWidth: projectionMode == .normal ? 0.5 : 1.0
+                                    )
                                 )
                                 .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
                         }

@@ -6,6 +6,7 @@ import CoreMotion
 public struct Web360Viewer: UIViewRepresentable {
     let image: UIImage
     var enableMotion: Bool = false
+    var projectionMode: PhotoProjectionMode = .normal
 
     public func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -33,6 +34,7 @@ public struct Web360Viewer: UIViewRepresentable {
         }
 
         context.coordinator.setMotionEnabled(enableMotion)
+        context.coordinator.setProjectionMode(projectionMode)
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -45,6 +47,7 @@ public struct Web360Viewer: UIViewRepresentable {
         var isReady = false
         var pendingImage: UIImage?
         var lastSentImageID: ObjectIdentifier?
+        var lastProjectionMode: PhotoProjectionMode?
 
         private let motionManager = CMMotionManager()
         private var isMotionActive = false
@@ -64,6 +67,24 @@ public struct Web360Viewer: UIViewRepresentable {
                 sendImageToWebGL(img)
                 pendingImage = nil
             }
+            setProjectionMode(parent.projectionMode, force: true)
+        }
+
+        func setProjectionMode(_ mode: PhotoProjectionMode, force: Bool = false) {
+            guard isReady else { return }
+            if !force && mode == lastProjectionMode { return }
+            lastProjectionMode = mode
+            let modeIdx: Int
+            switch mode {
+            case .normal: modeIdx = 0
+            case .fisheye: modeIdx = 1
+            case .littlePlanet: modeIdx = 2
+            case .rabbitHole: modeIdx = 3
+            case .crystalBall: modeIdx = 4
+            case .pano360: modeIdx = 0
+            }
+            let js = "window.setProjectionMode && window.setProjectionMode(\(modeIdx));"
+            webView?.evaluateJavaScript(js, completionHandler: nil)
         }
 
         func sendImageToWebGL(_ img: UIImage) {
@@ -154,6 +175,7 @@ public struct Web360Viewer: UIViewRepresentable {
         <script>
           let gl, prog, tex;
           let yaw = 0.0, pitch = 0.0, fovDeg = 75.0;
+          let projMode = 0; // 0: Normal, 1: Fisheye, 2: Little Planet, 3: Rabbit Hole, 4: Crystal Ball
           let gyroYaw = 0.0, gyroPitch = 0.0;
           let gyroOffsetYaw = 0.0, gyroOffsetPitch = 0.0;
           let isGyroEnabled = false;
@@ -170,7 +192,7 @@ public struct Web360Viewer: UIViewRepresentable {
             }
           `;
 
-          // Shader de proyección esférica equirrectangular 360° exacto de la Mac
+          // Shader de proyección esférica equirrectangular 360° con modos de proyección
           const fs = `
             precision highp float;
             varying vec2 vNdc;
@@ -178,11 +200,53 @@ public struct Web360Viewer: UIViewRepresentable {
             uniform float uYaw;
             uniform float uPitch;
             uniform float uTanHalfFov;
+            uniform float uFovDeg;
             uniform float uAspect;
+            uniform int uProjMode;
             const float PI = 3.141592653589793;
 
             void main() {
-              vec3 dir = normalize(vec3(vNdc.x * uTanHalfFov * uAspect, vNdc.y * uTanHalfFov, -1.0));
+              vec3 dir;
+              float rimGlow = 0.0;
+
+              if (uProjMode == 1) {
+                // Fisheye (equidistante gran angular)
+                vec2 p = vec2(vNdc.x * uAspect, vNdc.y);
+                float r = length(p);
+                float halfFovRad = (uFovDeg * PI) / 360.0;
+                float theta = r * halfFovRad;
+                if (theta > PI) {
+                  gl_FragColor = vec4(0.03, 0.03, 0.04, 1.0);
+                  return;
+                }
+                dir = (r > 0.0001) ? vec3((p / r) * sin(theta), -cos(theta)) : vec3(0.0, 0.0, -1.0);
+              } else if (uProjMode == 2) {
+                // Little Planet (estereográfica desde polo norte hacia nadir)
+                vec2 p = vec2(vNdc.x * uAspect, vNdc.y) * (uTanHalfFov * 1.4);
+                float r2 = dot(p, p);
+                dir = vec3(2.0 * p.x, r2 - 1.0, -2.0 * p.y) / (r2 + 1.0);
+              } else if (uProjMode == 3) {
+                // Rabbit Hole (estereográfica inversa hacia cenit)
+                vec2 p = vec2(vNdc.x * uAspect, vNdc.y) * (uTanHalfFov * 1.4);
+                float r2 = dot(p, p);
+                dir = vec3(2.0 * p.x, 1.0 - r2, -2.0 * p.y) / (r2 + 1.0);
+              } else if (uProjMode == 4) {
+                // Crystal Ball (esfera exterior de cristal)
+                float radius = clamp(0.85 * (75.0 / max(10.0, uFovDeg)), 0.35, 1.35);
+                vec2 p = vec2(vNdc.x * uAspect, vNdc.y) / radius;
+                float r2 = dot(p, p);
+                if (r2 > 1.0) {
+                  gl_FragColor = vec4(0.03, 0.03, 0.04, 1.0);
+                  return;
+                }
+                float z = sqrt(1.0 - r2);
+                dir = normalize(vec3(p.x, p.y, -z));
+                rimGlow = pow(1.0 - z, 3.0) * 0.25;
+              } else {
+                // Normal (rectilíneo)
+                dir = normalize(vec3(vNdc.x * uTanHalfFov * uAspect, vNdc.y * uTanHalfFov, -1.0));
+              }
+
               float cp = cos(uPitch), sp = sin(uPitch);
               vec3 d1 = vec3(dir.x, dir.y * cp - dir.z * sp, dir.y * sp + dir.z * cp);
               float cy = cos(uYaw), sy = sin(uYaw);
@@ -192,7 +256,8 @@ public struct Web360Viewer: UIViewRepresentable {
               float lat = asin(clamp(worldDir.y, -1.0, 1.0));
               float u = fract(lon / (2.0 * PI) + 0.5);
               float v = clamp(0.5 - lat / PI, 0.0, 1.0);
-              gl_FragColor = texture2D(uTex, vec2(u, v));
+              vec4 col = texture2D(uTex, vec2(u, v));
+              gl_FragColor = vec4(clamp(col.rgb + vec3(rimGlow), 0.0, 1.0), col.a);
             }
           `;
 
@@ -280,7 +345,9 @@ public struct Web360Viewer: UIViewRepresentable {
                 );
                 if (lastDist > 0) {
                   const factor = dist / lastDist;
-                  fovDeg = Math.max(25.0, Math.min(115.0, fovDeg / factor));
+                  const maxFov = (projMode === 1) ? 165.0 : (projMode === 2 || projMode === 3) ? 140.0 : 115.0;
+                  const minFov = (projMode === 1) ? 75.0 : 25.0;
+                  fovDeg = Math.max(minFov, Math.min(maxFov, fovDeg / factor));
                 }
                 lastDist = dist;
               }
@@ -297,7 +364,7 @@ public struct Web360Viewer: UIViewRepresentable {
                   if (now - lastTapTime < 300) {
                     yaw = 0.0;
                     pitch = 0.0;
-                    fovDeg = 75.0;
+                    fovDeg = (projMode === 1) ? 130.0 : (projMode === 2 || projMode === 3) ? 95.0 : 75.0;
                     gyroOffsetYaw = -gyroYaw;
                     gyroOffsetPitch = -gyroPitch;
                     lastTapTime = 0;
@@ -347,6 +414,12 @@ public struct Web360Viewer: UIViewRepresentable {
             isGyroEnabled = false;
           };
 
+          window.setProjectionMode = function(mode) {
+            projMode = mode;
+            pitch = 0.0;
+            fovDeg = (mode === 1) ? 130.0 : (mode === 2 || mode === 3) ? 95.0 : 75.0;
+          };
+
           function render() {
             if (gl && hasImage) {
               if (isGyroEnabled && !dragging) {
@@ -373,7 +446,9 @@ public struct Web360Viewer: UIViewRepresentable {
               gl.uniform1f(gl.getUniformLocation(prog, "uYaw"), yaw);
               gl.uniform1f(gl.getUniformLocation(prog, "uPitch"), pitch);
               gl.uniform1f(gl.getUniformLocation(prog, "uTanHalfFov"), Math.tan((fovDeg * Math.PI) / 360.0));
+              gl.uniform1f(gl.getUniformLocation(prog, "uFovDeg"), fovDeg);
               gl.uniform1f(gl.getUniformLocation(prog, "uAspect"), canvas.width / Math.max(1, canvas.height));
+              gl.uniform1i(gl.getUniformLocation(prog, "uProjMode"), projMode);
               gl.drawArrays(gl.TRIANGLES, 0, 6);
             }
             requestAnimationFrame(render);
