@@ -819,7 +819,7 @@ public class CameraManager: ObservableObject {
         } else if videoSlowMo > 0 {
             sendCommand(msgId: 4618, param: "0")
             sendCommand(msgId: 4621, param: "0")
-            sendCommand(msgId: 4916, param: "\(videoSlowMo)")
+            sendCommand(msgId: 4916, param: "2")
         } else {
             sendCommand(msgId: 4618, param: "0")
             sendCommand(msgId: 4621, param: "0")
@@ -1131,7 +1131,7 @@ public class CameraManager: ObservableObject {
             UserDefaults.standard.set(0, forKey: "cam_videoTimelapse")
             sendCommand(msgId: 4618, param: "0")
             sendCommand(msgId: 4621, param: "0")
-            sendCommand(msgId: 4916, param: "\(val)")
+            sendCommand(msgId: 4916, param: "2")
         } else {
             sendCommand(msgId: 4916, param: "0")
         }
