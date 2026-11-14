@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import CoreVideo
 import MetalKit
 import UIKit
 
@@ -53,7 +54,7 @@ final class VideoPreviewController: ObservableObject {
         let playerItem = AVPlayerItem(asset: asset)
 
         let attrs: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelBufferPixelFormatType_420YpCbCr8BiPlanarFullRange)
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
         ]
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes: attrs)
         playerItem.add(output)
@@ -220,10 +221,12 @@ struct VideoPreviewView: View {
 
     private var formattedFileSize: String {
         if controller.fileSizeBytes > 0 {
-            let mb = Double(controller.fileSizeBytes) / (1024.0 * 1024.0)
-            return String(format: "%.1f MB", mb)
+            let bcf = ByteCountFormatter()
+            bcf.allowedUnits = [.useGB, .useMB, .useKB]
+            bcf.countStyle = .file
+            return bcf.string(fromByteCount: controller.fileSizeBytes)
         }
-        return item.sizeFormatted
+        return "Video MP4"
     }
 
     private func formatTime(_ seconds: Double) -> String {
