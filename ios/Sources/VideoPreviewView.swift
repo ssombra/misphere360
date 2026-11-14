@@ -356,22 +356,8 @@ struct VideoPreviewView: View {
 
                     Spacer()
 
-                    // Barra inferior: selector de proyección + controles de reproducción
-                    VStack(spacing: 10) {
-                        // Selector 360° / Panorama / Fisheye
-                        Picker("Proyección", selection: Binding(
-                            get: { controller.renderer.mode },
-                            set: { controller.renderer.mode = $0 }
-                        )) {
-                            ForEach(Metal360Renderer.DisplayMode.allCases) { mode in
-                                Text(mode.title).tag(mode)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 260)
-
-                        // Timeline + Play/Pause + Mute
-                        HStack(spacing: 12) {
+                    // Barra inferior: controles de reproducción
+                    HStack(spacing: 12) {
                             Button {
                                 controller.togglePlayPause()
                             } label: {
@@ -413,12 +399,11 @@ struct VideoPreviewView: View {
                                     .foregroundColor(.white)
                                     .frame(width: 32, height: 32)
                             }
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.65))
-                        .cornerRadius(16)
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.65))
+                    .cornerRadius(16)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
                 }
