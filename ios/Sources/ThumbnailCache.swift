@@ -28,9 +28,10 @@ public class ThumbnailCache: ObservableObject {
     }
 
     private func cacheKey(for item: SDFileItem) -> String {
-        return "\(item.folder)_\(item.filename)"
+        let base = "\(item.folder)_\(item.filename)"
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: " ", with: "_")
+        return item.isVideo ? "\(base)_v2" : base
     }
 
     private func diskFileURL(for key: String) -> URL {
@@ -141,14 +142,14 @@ public class ThumbnailCache: ObservableObject {
         generator.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
         generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
 
-        let targetTime = CMTime(seconds: 0.2, preferredTimescale: 600)
+        let targetTime = CMTime(seconds: 0.5, preferredTimescale: 600)
         guard let cgImg = (try? generator.copyCGImage(at: targetTime, actualTime: nil))
                 ?? (try? generator.copyCGImage(at: .zero, actualTime: nil)) else {
             return nil
         }
 
         let rawImg = UIImage(cgImage: cgImg)
-        return PhotoStitcher.shared.stitchDualFisheyeImage(rawImg, maxPixelSize: 480) ?? rawImg
+        return VideoStitcher.shared.stitchDualFisheyeThumbnail(rawImg) ?? rawImg
     }
 
     private func queueVideoThumbnailFetch(item: SDFileItem, key: String, completion: @escaping (UIImage?) -> Void) {

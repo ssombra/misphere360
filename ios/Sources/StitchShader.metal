@@ -184,3 +184,30 @@ fragment float4 stitchOffscreenEquirectFragment(
 
     return mix(col2, col1, w1);
 }
+
+// Fragment shader para miniaturas de video RGBA -> equirrectangular 2:1 (resolución independiente)
+fragment float4 stitchOffscreenEquirectRGBAFragment(
+    VertexOut in [[stage_in]],
+    texture2d<float> rgbaTex [[texture(0)]],
+    texture2d<float> lut1Tex [[texture(1)]],
+    texture2d<float> lut2Tex [[texture(2)]],
+    texture2d<float> weightTex [[texture(3)]],
+    sampler s [[sampler(0)]]
+) {
+    float2 eqUV = float2(in.ndc.x * 0.5 + 0.5, 0.5 - in.ndc.y * 0.5);
+
+    float w1 = weightTex.sample(s, eqUV).r;
+    float4 col1 = float4(0.0);
+    float4 col2 = float4(0.0);
+
+    if (w1 > 0.001) {
+        float2 uv1 = lut1Tex.sample(s, eqUV).rg;
+        col1 = rgbaTex.sample(s, uv1);
+    }
+    if (w1 < 0.999) {
+        float2 uv2 = lut2Tex.sample(s, eqUV).rg;
+        col2 = rgbaTex.sample(s, uv2);
+    }
+
+    return mix(col2, col1, w1);
+}

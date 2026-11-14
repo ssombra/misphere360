@@ -48,6 +48,7 @@ public final class VideoStitcher {
     private let commandQueue: MTLCommandQueue?
     private var pipelineState: MTLRenderPipelineState?
     private var reframePipelineState: MTLRenderPipelineState?
+    private var rgbaThumbPipelineState: MTLRenderPipelineState?
     private var samplerState: MTLSamplerState?
     private var textureCache: CVMetalTextureCache?
 
@@ -73,7 +74,8 @@ public final class VideoStitcher {
         guard let lib = dev.makeDefaultLibrary() ?? (try? dev.makeDefaultLibrary(bundle: Bundle.main)),
               let vFunc = lib.makeFunction(name: "stitchVertexShader"),
               let fFunc = lib.makeFunction(name: "stitchOffscreenEquirectFragment"),
-              let fReframeFunc = lib.makeFunction(name: "stitchFragmentShader") else {
+              let fReframeFunc = lib.makeFunction(name: "stitchFragmentShader"),
+              let fThumbFunc = lib.makeFunction(name: "stitchOffscreenEquirectRGBAFragment") else {
             print("[VideoStitcher] No se pudieron cargar los shaders Metal.")
             return false
         }
@@ -88,9 +90,15 @@ public final class VideoStitcher {
         reframeDesc.fragmentFunction = fReframeFunc
         reframeDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
 
+        let thumbDesc = MTLRenderPipelineDescriptor()
+        thumbDesc.vertexFunction = vFunc
+        thumbDesc.fragmentFunction = fThumbFunc
+        thumbDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+
         do {
             self.pipelineState = try dev.makeRenderPipelineState(descriptor: desc)
             self.reframePipelineState = try dev.makeRenderPipelineState(descriptor: reframeDesc)
+            self.rgbaThumbPipelineState = try dev.makeRenderPipelineState(descriptor: thumbDesc)
         } catch {
             print("[VideoStitcher] Error creando RenderPipelineState: \(error)")
             return false
@@ -164,6 +172,99 @@ public final class VideoStitcher {
         self.lut2Texture = t2
         self.weightTexture = tw
         return true
+    }
+
+    /// Cose por GPU una imagen dual-fisheye de cualquier resolución a una miniatura equirrectangular 2:1.
+    public func stitchDualFisheyeThumbnail(_ image: UIImage, width: Int = 512, height: Int = 256) -> UIImage? {
+        guard ensureMetalReady(),
+              let dev = device,
+              let commandQueue = commandQueue,
+              let pipeline = rgbaThumbPipelineState,
+              let sampler = samplerState,
+              let lut1 = lut1Texture,
+              let lut2 = lut2Texture,
+              let weight = weightTexture,
+              let cgImage = image.cgImage else {
+            return nil
+        }
+
+        let inW = cgImage.width
+        let inH = cgImage.height
+        guard inW > 0, inH > 0 else { return nil }
+
+        let inBytesPerRow = inW * 4
+        var inBytes = [UInt8](repeating: 0, count: inBytesPerRow * inH)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let inBitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let ctx = CGContext(
+            data: &inBytes,
+            width: inW,
+            height: inH,
+            bitsPerComponent: 8,
+            bytesPerRow: inBytesPerRow,
+            space: colorSpace,
+            bitmapInfo: inBitmapInfo
+        ) else {
+            return nil
+        }
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: inW, height: inH))
+
+        let inDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: inW, height: inH, mipmapped: false)
+        inDesc.usage = .shaderRead
+        guard let inTex = dev.makeTexture(descriptor: inDesc) else { return nil }
+        inTex.replace(region: MTLRegionMake2D(0, 0, inW, inH), mipmapLevel: 0, withBytes: inBytes, bytesPerRow: inBytesPerRow)
+
+        let outDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+        outDesc.usage = [.renderTarget, .shaderRead]
+        outDesc.storageMode = .shared
+        guard let outTex = dev.makeTexture(descriptor: outDesc) else { return nil }
+
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = outTex
+        rpd.colorAttachments[0].loadAction = .dontCare
+        rpd.colorAttachments[0].storeAction = .store
+
+        guard let cmdBuf = commandQueue.makeCommandBuffer(),
+              let enc = cmdBuf.makeRenderCommandEncoder(descriptor: rpd) else {
+            return nil
+        }
+
+        enc.setRenderPipelineState(pipeline)
+        enc.setFragmentTexture(inTex, index: 0)
+        enc.setFragmentTexture(lut1, index: 1)
+        enc.setFragmentTexture(lut2, index: 2)
+        enc.setFragmentTexture(weight, index: 3)
+        enc.setFragmentSamplerState(sampler, index: 0)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+        enc.endEncoding()
+
+        cmdBuf.commit()
+        cmdBuf.waitUntilCompleted()
+        guard cmdBuf.status == .completed else { return nil }
+
+        let outBytesPerRow = width * 4
+        var outBytes = [UInt8](repeating: 0, count: outBytesPerRow * height)
+        outTex.getBytes(&outBytes, bytesPerRow: outBytesPerRow, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+
+        let outBitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        guard let provider = CGDataProvider(data: Data(outBytes) as CFData),
+              let outCG = CGImage(
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: outBytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGBitmapInfo(rawValue: outBitmapInfo),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: true,
+                intent: .defaultIntent
+              ) else {
+            return nil
+        }
+
+        return UIImage(cgImage: outCG)
     }
 
     /// Determina la resolución equirrectangular 2:1 y bitrate H.264 óptimo según la resolución del video fuente.

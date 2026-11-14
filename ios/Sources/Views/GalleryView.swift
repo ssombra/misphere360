@@ -64,30 +64,35 @@ struct GalleryView: View {
     }
 
     private var displayedFiles: [SDFileItem] {
+        let items: [SDFileItem]
         if activeTab == .camera {
-            return allFiles
+            items = allFiles
+        } else {
+            let localItems = localLibrary.assets.map { localLibrary.toSDFileItem($0) }
+            items = localItems.filter { item in
+                guard let date = parseDate(from: item.filename) else {
+                    return activeFilter == .all
+                }
+                let cal = Calendar.current
+                let now = Date()
+                switch activeFilter {
+                case .last7Days:
+                    guard let cutoff = cal.date(byAdding: .day, value: -7, to: now) else { return true }
+                    return date >= cutoff
+                case .last30Days:
+                    guard let cutoff = cal.date(byAdding: .day, value: -30, to: now) else { return true }
+                    return date >= cutoff
+                case .all:
+                    return true
+                case .custom(let start, let end):
+                    let s = cal.startOfDay(for: start)
+                    let e = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: end)) ?? end
+                    return date >= s && date < e
+                }
+            }
         }
-        let localItems = localLibrary.assets.map { localLibrary.toSDFileItem($0) }
-        return localItems.filter { item in
-            guard let date = parseDate(from: item.filename) else {
-                return activeFilter == .all
-            }
-            let cal = Calendar.current
-            let now = Date()
-            switch activeFilter {
-            case .last7Days:
-                guard let cutoff = cal.date(byAdding: .day, value: -7, to: now) else { return true }
-                return date >= cutoff
-            case .last30Days:
-                guard let cutoff = cal.date(byAdding: .day, value: -30, to: now) else { return true }
-                return date >= cutoff
-            case .all:
-                return true
-            case .custom(let start, let end):
-                let s = cal.startOfDay(for: start)
-                let e = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: end)) ?? end
-                return date >= s && date < e
-            }
+        return items.sorted {
+            (parseDate(from: $0.filename) ?? .distantPast) > (parseDate(from: $1.filename) ?? .distantPast)
         }
     }
 
