@@ -525,10 +525,11 @@ public class CameraManager: ObservableObject {
             case 4864, 4868, 5025, 5029: // DISPARO FOTO Y SUB-MODOS (5025: Intervalo, 5029: HDR Bracketing)
                 if rval == 0 {
                     if msgId == 5025 {
-                        let param = obj["param"] as? Int ?? 0
-                        if param == -1 {
+                        let rawParam = obj["param"]
+                        let paramStr = String(describing: rawParam ?? "")
+                        if paramStr == "-1" || (rawParam as? Int) == -1 {
                             self.isIntervalRunning = false
-                            self.lastStatusMessage = "Intervalómetro detenido."
+                            self.lastStatusMessage = "Intervalómetro detenido (5025)."
                         } else {
                             self.isIntervalRunning = true
                             self.lastStatusMessage = "Intervalómetro activo (5025)."
@@ -755,7 +756,8 @@ public class CameraManager: ObservableObject {
         }
 
         if photoInterval > 0 {
-            // Intervalómetro: Se inicia con 5025 (AMBA_MSGID_SHOOT_PHOTO_INTERVAL)
+            // Asegurar que el registro 4929 esté activo en la cámara y disparar el intervalo con 5025
+            sendCommand(msgId: 4929, param: "\(photoInterval)")
             lastStatusMessage = "Iniciando intervalómetro (5025)..."
             sendCommand(msgId: 5025, param: nil)
         } else if photoBracketing > 0 {
@@ -777,10 +779,12 @@ public class CameraManager: ObservableObject {
     }
 
     public func stopInterval() {
-        // Enviar 5025 detiene el ciclo del intervalómetro en la cámara (responde param: -1)
-        sendCommand(msgId: 5025, param: nil)
         isIntervalRunning = false
-        lastStatusMessage = "Deteniendo intervalómetro..."
+        // 1. Enviar orden de cierre de sesión de intervalo (5025)
+        sendCommand(msgId: 5025, param: nil)
+        // 2. Desactivar explícitamente el registro de intervalómetro en la memoria de la cámara (4929: 0)
+        sendCommand(msgId: 4929, param: "0")
+        lastStatusMessage = "Intervalómetro detenido."
     }
 
     // NOTA TÉCNICA: La Xiaomi Mi Sphere 360 emite el flujo RTSP en rtsp://192.168.42.1/live de manera
