@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import SwiftUI
 import ImageIO
+import AVFoundation
 
 /// Administra la descarga asíncrona, decodificación eficiente y caché en disco/RAM de miniaturas de la microSD
 public class ThumbnailCache: ObservableObject {
@@ -131,40 +132,124 @@ public class ThumbnailCache: ObservableObject {
         }
     }
 
-    private func queueVideoThumbnailFetch(item: SDFileItem, key: String, completion: @escaping (UIImage?) -> Void) {
-        // En cámaras Ambarella, la miniatura de un video VID_xxx.MP4 suele llamarse VID_xxx.THM
-        let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let rawName = item.filename
-        var thmNames: [String] = []
-        if rawName.uppercased().hasSuffix(".MP4") {
-            let stem = rawName.dropLast(4)
-            thmNames.append("\(stem)AA.THM")
-            thmNames.append("\(stem).THM")
-            thmNames.append("\(stem)aa.thm")
-            thmNames.append("\(stem).thm")
+    /// Genera y cose la miniatura del primer frame de un video local o remoto.
+    public func generateVideoThumbnail(from videoURL: URL) -> UIImage? {
+        let asset = AVURLAsset(url: videoURL)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 960, height: 480)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
+
+        let targetTime = CMTime(seconds: 0.2, preferredTimescale: 600)
+        guard let cgImg = (try? generator.copyCGImage(at: targetTime, actualTime: nil))
+                ?? (try? generator.copyCGImage(at: .zero, actualTime: nil)) else {
+            return nil
         }
 
-        let prefixes = ["/DCIM", "", "/SD0/DCIM"]
+        let rawImg = UIImage(cgImage: cgImg)
+        return PhotoStitcher.shared.stitchDualFisheyeImage(rawImg, maxPixelSize: 480) ?? rawImg
+    }
+
+    private func queueVideoThumbnailFetch(item: SDFileItem, key: String, completion: @escaping (UIImage?) -> Void) {
+        // 1. Si el video ya está en la biblioteca Local, extraer frame directo del disco sin usar Wi-Fi
+        if let localAsset = LocalLibraryManager.shared.asset(for: item) {
+            let localVideoURL = LocalLibraryManager.shared.originalURL(for: localAsset)
+            downloadQueue.addOperation { [weak self] in
+                guard let self = self else { return }
+                let thumb = self.generateVideoThumbnail(from: localVideoURL)
+                if let thumb = thumb {
+                    self.saveThumbnailToCaches(thumb, key: key)
+                }
+                self.syncQueue.async {
+                    self.inFlightKeys.remove(key)
+                }
+                DispatchQueue.main.async {
+                    completion(thumb)
+                }
+            }
+            return
+        }
+
+        // 2. Si está en la cámara, priorizar proxy AB.MP4 (y AA.MP4 como respaldo) y leer solo el primer frame vía HTTP Range
+        let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let rawName = item.filename
+        var mp4Names: [String] = []
+        let upper = rawName.uppercased()
+        if upper.hasSuffix(".MP4") {
+            let stem: String
+            if upper.hasSuffix("AA.MP4") || upper.hasSuffix("AB.MP4") {
+                stem = String(rawName.dropLast(6))
+            } else {
+                stem = String(rawName.dropLast(4))
+            }
+            mp4Names.append("\(stem)AB.MP4")
+            mp4Names.append("\(stem)ab.mp4")
+            mp4Names.append("\(stem)AA.MP4")
+            mp4Names.append(rawName)
+            mp4Names.append("\(stem).MP4")
+        } else {
+            mp4Names.append(rawName)
+        }
+
+        var prefixes = ["/DCIM", "", "/SD0/DCIM"]
+        if let pref = rememberedPrefix {
+            prefixes.removeAll(where: { $0 == pref })
+            prefixes.insert(pref, at: 0)
+        }
+
         var candidateURLs: [URL] = []
         for p in prefixes {
-            for t in thmNames {
-                if let u = URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)\(p)/\(cleanFolder)/\(t)") {
-                    candidateURLs.append(u)
+            for name in mp4Names {
+                if let u = URL(string: "http://\(CameraManager.cameraIP):\(CameraManager.httpPort)\(p)/\(cleanFolder)/\(name)") {
+                    if !candidateURLs.contains(u) {
+                        candidateURLs.append(u)
+                    }
                 }
             }
         }
 
         downloadQueue.addOperation { [weak self] in
             guard let self = self else { return }
-            self.downloadAndProcessThumbnail(urls: candidateURLs, key: key) { [weak self] image in
-                self?.syncQueue.async {
-                    self?.inFlightKeys.remove(key)
-                }
-                DispatchQueue.main.async {
-                    completion(image)
-                }
+            let thumb = self.extractRemoteVideoThumbnail(urls: candidateURLs, key: key)
+            self.syncQueue.async {
+                self.inFlightKeys.remove(key)
+            }
+            DispatchQueue.main.async {
+                completion(thumb)
             }
         }
+    }
+
+    private func extractRemoteVideoThumbnail(urls: [URL], key: String) -> UIImage? {
+        for url in urls {
+            var headReq = URLRequest(url: url)
+            headReq.httpMethod = "HEAD"
+            headReq.timeoutInterval = 3.0
+
+            let sema = DispatchSemaphore(value: 0)
+            var exists = false
+            URLSession.shared.dataTask(with: headReq) { _, resp, _ in
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                exists = (code == 200 || code == 206)
+                sema.signal()
+            }.resume()
+            sema.wait()
+
+            if exists, let thumb = generateVideoThumbnail(from: url) {
+                saveThumbnailToCaches(thumb, key: key)
+                let path = url.path
+                if path.contains("/DCIM/") {
+                    rememberedPrefix = "/DCIM"
+                } else if path.contains("/SD0/DCIM/") {
+                    rememberedPrefix = "/SD0/DCIM"
+                } else {
+                    rememberedPrefix = ""
+                }
+                return thumb
+            }
+        }
+        return nil
     }
 
     private func downloadAndProcessThumbnail(urls: [URL], key: String, completion: @escaping (UIImage?) -> Void) {

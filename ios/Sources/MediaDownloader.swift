@@ -92,6 +92,11 @@ public class MediaDownloader: ObservableObject {
                     self.statusMessage = "Cosiendo vista 360° para Local..."
                 }
                 stitched = PhotoStitcher.shared.stitchForInteractivePreview(from: tempURL, maxPixelSize: 3840)
+            } else {
+                DispatchQueue.main.async {
+                    self.statusMessage = "Generando miniatura para Local..."
+                }
+                stitched = ThumbnailCache.shared.generateVideoThumbnail(from: tempURL)
             }
 
             LocalLibraryManager.shared.saveMedia(item: item, originalTempURL: tempURL, stitchedImage: stitched) { saved in

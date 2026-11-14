@@ -109,6 +109,27 @@ public class PhotoStitcher {
         return downsampleImageSource(from: stitchedURL, maxPixelSize: maxPixelSize)
     }
 
+    /// Cose directamente un frame dual-fisheye (ej. primer frame de un video MP4) a miniatura panorámica 360°
+    public func stitchDualFisheyeImage(_ image: UIImage, maxPixelSize: CGFloat = 480) -> UIImage? {
+        guard let lut = lutURL, FileManager.default.fileExists(atPath: lut.path),
+              let jpegData = image.jpegData(compressionQuality: 0.85) else {
+            return nil
+        }
+
+        let fm = FileManager.default
+        let inURL = fm.temporaryDirectory.appendingPathComponent("MiSphere_vthumb_in_\(UUID().uuidString).JPG")
+        let outURL = fm.temporaryDirectory.appendingPathComponent("MiSphere_vthumb_out_\(UUID().uuidString).JPG")
+        defer {
+            try? fm.removeItem(at: inURL)
+            try? fm.removeItem(at: outURL)
+        }
+
+        guard (try? jpegData.write(to: inURL)) != nil else { return nil }
+        let status = stitch_dual_fisheye_c(inURL.path, lut.path, outURL.path)
+        guard status == 0 else { return nil }
+        return downsampleImageSource(from: outURL, maxPixelSize: maxPixelSize)
+    }
+
     /// Cose rápidamente para vista previa interactiva a pantalla completa en <0.3s (máximo 4K)
     public func stitchForInteractivePreview(from localURL: URL, maxPixelSize: CGFloat = 3840) -> UIImage? {
         guard let data = try? Data(contentsOf: localURL) else { return nil }
