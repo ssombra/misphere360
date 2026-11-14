@@ -38,6 +38,8 @@ struct GalleryView: View {
 
     // Filtros de fecha y guardado
     @State private var activeFilter: GalleryFilterType = .last7Days
+    @State private var expandedMonths: Set<String> = []
+    @State private var expandedDays: Set<String> = []
     @State private var showDatePickerSheet = false
     @State private var showStorageInfoSheet = false
     @State private var customStartDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
@@ -242,6 +244,14 @@ struct GalleryView: View {
             .sheet(isPresented: $showDatePickerSheet) {
                 datePickerSheetView
             }
+            .onChange(of: activeFilter) { _ in
+                expandedMonths.removeAll()
+                expandedDays.removeAll()
+            }
+            .onChange(of: activeTab) { _ in
+                expandedMonths.removeAll()
+                expandedDays.removeAll()
+            }
             .fullScreenCover(item: $previewItem) { item in
                 if item.isVideo {
                     VideoPreviewView(
@@ -361,33 +371,168 @@ struct GalleryView: View {
 
     private var mainTimelineGrid: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                ForEach(groupedSections, id: \.title) { section in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(section.title)
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.white)
-                            Spacer()
-                            Text("\(section.items.count)")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.horizontal, 16)
+            LazyVStack(alignment: .leading, spacing: 12) {
+                if activeFilter == .last7Days {
+                    ForEach(groupedSections, id: \.title) { section in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(section.title)
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white)
+                                Spacer()
+                                Text("\(section.items.count)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 16)
 
-                        LazyVGrid(columns: [
-                            GridItem(.flexible(), spacing: 10),
-                            GridItem(.flexible(), spacing: 10)
-                        ], spacing: 10) {
-                            ForEach(section.items) { item in
-                                modernMediaCell(item: item)
+                            dayGridView(items: section.items)
+                        }
+                        .padding(.bottom, 6)
+                    }
+                } else if activeFilter == .all {
+                    ForEach(groupedMonths, id: \.title) { month in
+                        let isMonthOpen = expandedMonths.contains(month.title)
+                        VStack(alignment: .leading, spacing: 8) {
+                            collapsibleHeaderButton(
+                                title: month.title,
+                                countText: sectionSummaryText(items: month.allItems),
+                                isExpanded: isMonthOpen,
+                                isMonth: true
+                            ) {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    if isMonthOpen {
+                                        expandedMonths.remove(month.title)
+                                    } else {
+                                        expandedMonths.insert(month.title)
+                                    }
+                                }
+                            }
+
+                            if isMonthOpen {
+                                ForEach(month.days, id: \.title) { day in
+                                    let dayID = "\(month.title)|\(day.title)"
+                                    let isDayOpen = expandedDays.contains(dayID)
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        collapsibleHeaderButton(
+                                            title: day.title,
+                                            countText: sectionSummaryText(items: day.items),
+                                            isExpanded: isDayOpen,
+                                            isMonth: false
+                                        ) {
+                                            withAnimation(.easeInOut(duration: 0.2)) {
+                                                if isDayOpen {
+                                                    expandedDays.remove(dayID)
+                                                } else {
+                                                    expandedDays.insert(dayID)
+                                                }
+                                            }
+                                        }
+                                        .padding(.leading, 10)
+
+                                        if isDayOpen {
+                                            dayGridView(items: day.items)
+                                        }
+                                    }
+                                }
                             }
                         }
-                        .padding(.horizontal, 16)
+                    }
+                } else {
+                    // .last30Days y .custom: días contraídos por defecto
+                    ForEach(groupedSections, id: \.title) { section in
+                        let isDayOpen = expandedDays.contains(section.title)
+                        VStack(alignment: .leading, spacing: 8) {
+                            collapsibleHeaderButton(
+                                title: section.title,
+                                countText: sectionSummaryText(items: section.items),
+                                isExpanded: isDayOpen,
+                                isMonth: false
+                            ) {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    if isDayOpen {
+                                        expandedDays.remove(section.title)
+                                    } else {
+                                        expandedDays.insert(section.title)
+                                    }
+                                }
+                            }
+
+                            if isDayOpen {
+                                dayGridView(items: section.items)
+                            }
+                        }
                     }
                 }
             }
             .padding(.vertical, 8)
+        }
+    }
+
+    private func dayGridView(items: [SDFileItem]) -> some View {
+        LazyVGrid(columns: [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10)
+        ], spacing: 10) {
+            ForEach(items) { item in
+                modernMediaCell(item: item)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func collapsibleHeaderButton(
+        title: String,
+        countText: String,
+        isExpanded: Bool,
+        isMonth: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(isExpanded ? brandOrange : .gray)
+                    .frame(width: 16)
+
+                if isMonth {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(brandOrange)
+                }
+
+                Text(title)
+                    .font(.system(size: isMonth ? 15 : 14, weight: .bold))
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Text(countText)
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, isMonth ? 12 : 10)
+            .background(isMonth ? cardBg : cardBg.opacity(0.65))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isExpanded ? brandOrange.opacity(0.35) : Color.white.opacity(0.06), lineWidth: 1)
+            )
+            .padding(.horizontal, 16)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func sectionSummaryText(items: [SDFileItem]) -> String {
+        let videos = items.filter { $0.isVideo }.count
+        let photos = items.count - videos
+        if videos > 0 && photos > 0 {
+            return "\(photos) fotos · \(videos) videos"
+        } else if videos > 0 {
+            return "\(videos) \(videos == 1 ? "video" : "videos")"
+        } else {
+            return "\(photos) \(photos == 1 ? "foto" : "fotos")"
         }
     }
 
@@ -631,11 +776,40 @@ struct GalleryView: View {
         let items: [SDFileItem]
     }
 
+    private struct GroupedMonthSection {
+        let title: String
+        let days: [GroupedSection]
+        var allItems: [SDFileItem] { days.flatMap { $0.items } }
+    }
+
     private var groupedSections: [GroupedSection] {
+        groupItemsByDay(displayedFiles)
+    }
+
+    private var groupedMonths: [GroupedMonthSection] {
         var dict: [String: [SDFileItem]] = [:]
         var order: [String] = []
 
         for item in displayedFiles {
+            let monthKey = formatHumanMonth(from: item.filename)
+            if dict[monthKey] == nil {
+                dict[monthKey] = []
+                order.append(monthKey)
+            }
+            dict[monthKey]?.append(item)
+        }
+
+        return order.map { monthTitle in
+            let monthItems = dict[monthTitle] ?? []
+            return GroupedMonthSection(title: monthTitle, days: groupItemsByDay(monthItems))
+        }
+    }
+
+    private func groupItemsByDay(_ items: [SDFileItem]) -> [GroupedSection] {
+        var dict: [String: [SDFileItem]] = [:]
+        var order: [String] = []
+
+        for item in items {
             let dayKey = formatHumanDay(from: item.filename)
             if dict[dayKey] == nil {
                 dict[dayKey] = []
@@ -644,6 +818,12 @@ struct GalleryView: View {
             dict[dayKey]?.append(item)
         }
         return order.map { GroupedSection(title: $0, items: dict[$0] ?? []) }
+    }
+
+    private func formatHumanMonth(from filename: String) -> String {
+        guard let d = parseDate(from: filename) else { return "Otros" }
+        let raw = formatDate(d, format: "MMMM yyyy")
+        return raw.prefix(1).uppercased() + raw.dropFirst()
     }
 
     private func formatHumanDay(from filename: String) -> String {
