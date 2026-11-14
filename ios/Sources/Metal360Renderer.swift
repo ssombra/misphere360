@@ -62,7 +62,7 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         var aspect: Float
     }
 
-    private override init() {
+    public override init() {
         super.init()
         setupMetal()
         loadFactoryLUT()

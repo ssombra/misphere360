@@ -140,10 +140,12 @@ public struct LiveViewPlayerView: View {
 // MARK: - Puente UIViewRepresentable con MTKView (Metal)
 
 struct Metal360ViewRepresentable: UIViewRepresentable {
+    var renderer: Metal360Renderer = .shared
+
     func makeUIView(context: Context) -> MTKView {
         let mtkView = MTKView()
         mtkView.device = MTLCreateSystemDefaultDevice()
-        mtkView.delegate = Metal360Renderer.shared
+        mtkView.delegate = renderer
         mtkView.framebufferOnly = true
         mtkView.colorPixelFormat = .bgra8Unorm
         mtkView.contentScaleFactor = min(UIScreen.main.scale, 2.0)
@@ -152,7 +154,7 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
         mtkView.enableSetNeedsDisplay = true
         mtkView.backgroundColor = .black
 
-        Metal360Renderer.shared.mtkView = mtkView
+        renderer.mtkView = mtkView
 
         // Gesto de arrastre para explorar en 360°
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
@@ -175,11 +177,16 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
     func updateUIView(_ uiView: MTKView, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(renderer: renderer)
     }
 
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private let renderer: Metal360Renderer
         private var lastLocation: CGPoint = .zero
+
+        init(renderer: Metal360Renderer) {
+            self.renderer = renderer
+        }
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             let loc = gesture.translation(in: gesture.view)
@@ -189,13 +196,13 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
                 let dx = loc.x - lastLocation.x
                 let dy = loc.y - lastLocation.y
                 lastLocation = loc
-                Metal360Renderer.shared.handlePan(deltaX: dx, deltaY: dy)
+                renderer.handlePan(deltaX: dx, deltaY: dy)
             }
         }
 
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             if gesture.state == .changed {
-                Metal360Renderer.shared.handlePinch(scale: gesture.scale)
+                renderer.handlePinch(scale: gesture.scale)
                 gesture.scale = 1.0
             }
         }
@@ -203,7 +210,7 @@ struct Metal360ViewRepresentable: UIViewRepresentable {
         @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
             let impact = UIImpactFeedbackGenerator(style: .medium)
             impact.impactOccurred()
-            Metal360Renderer.shared.resetOrientation()
+            renderer.resetOrientation()
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
