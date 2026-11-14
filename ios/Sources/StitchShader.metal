@@ -155,3 +155,31 @@ fragment float4 stitchFragmentShader(
     float4 result = mix(col2, col1, w1);
     return float4(clamp(result.rgb + float3(rimGlow), 0.0, 1.0), result.a);
 }
+
+// Fragment shader dedicado para exportación offscreen equirrectangular 2:1 (VideoStitcher)
+fragment float4 stitchOffscreenEquirectFragment(
+    VertexOut in [[stage_in]],
+    texture2d<float> yTex [[texture(0)]],
+    texture2d<float> uvTex [[texture(1)]],
+    texture2d<float> lut1Tex [[texture(2)]],
+    texture2d<float> lut2Tex [[texture(3)]],
+    texture2d<float> weightTex [[texture(4)]],
+    sampler s [[sampler(0)]]
+) {
+    float2 eqUV = float2(in.ndc.x * 0.5 + 0.5, 0.5 - in.ndc.y * 0.5);
+
+    float w1 = weightTex.sample(s, eqUV).r;
+    float4 col1 = float4(0.0);
+    float4 col2 = float4(0.0);
+
+    if (w1 > 0.001) {
+        float2 uv1 = lut1Tex.sample(s, eqUV).rg;
+        col1 = sampleYUV(yTex, uvTex, s, uv1);
+    }
+    if (w1 < 0.999) {
+        float2 uv2 = lut2Tex.sample(s, eqUV).rg;
+        col2 = sampleYUV(yTex, uvTex, s, uv2);
+    }
+
+    return mix(col2, col1, w1);
+}

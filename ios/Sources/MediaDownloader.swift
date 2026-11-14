@@ -2,6 +2,7 @@ import Foundation
 import Photos
 import UIKit
 import Combine
+import CoreLocation
 
 /// Descarga fotos y videos desde la cámara Xiaomi Mi Sphere 360 y los guarda en el Carrete de Apple Fotos
 public class MediaDownloader: ObservableObject {
@@ -462,38 +463,119 @@ public class MediaDownloader: ObservableObject {
         mode: StitchMode,
         completion: @escaping (Bool, String) -> Void
     ) {
+        let shotLocation = LocationManager.shared.getBestLocation(for: item.filename)
+
+        if item.isVideo {
+            if mode == .original {
+                DispatchQueue.main.async {
+                    self.statusMessage = "Guardando video original en Apple Fotos..."
+                }
+                saveFilesToPhotosLibrary(
+                    filesToSave: [destinationURL],
+                    cleanupURLs: [destinationURL],
+                    item: item,
+                    mode: mode,
+                    location: shotLocation,
+                    completion: completion
+                )
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.downloadProgress = 0.0
+                self.statusMessage = "Cosiendo video 360°..."
+            }
+
+            let stitchedURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("MiSphere_360_\(UUID().uuidString).mp4")
+
+            VideoStitcher.shared.stitchVideo(
+                inputURL: destinationURL,
+                outputURL: stitchedURL,
+                progress: { [weak self] p in
+                    self?.downloadProgress = p
+                    self?.statusMessage = "Cosiendo video 360°... \(Int(p * 100))%"
+                },
+                completion: { [weak self] result in
+                    guard let self = self else { return }
+                    switch result {
+                    case .success(let finalStitchedURL):
+                        DispatchQueue.main.async {
+                            self.statusMessage = "Guardando video 360° en Apple Fotos..."
+                        }
+                        let filesToSave = (mode == .both) ? [destinationURL, finalStitchedURL] : [finalStitchedURL]
+                        self.saveFilesToPhotosLibrary(
+                            filesToSave: filesToSave,
+                            cleanupURLs: [destinationURL, finalStitchedURL],
+                            item: item,
+                            mode: mode,
+                            location: shotLocation,
+                            completion: completion
+                        )
+                    case .failure(let err):
+                        try? FileManager.default.removeItem(at: destinationURL)
+                        try? FileManager.default.removeItem(at: stitchedURL)
+                        DispatchQueue.main.async {
+                            self.isDownloading = false
+                            completion(false, "Error al coser el video 360°: \(err.localizedDescription)")
+                        }
+                    }
+                }
+            )
+            return
+        }
+
         DispatchQueue.main.async {
-            self.statusMessage = (mode == .stitched360 || mode == .both) && !item.isVideo
+            self.statusMessage = (mode == .stitched360 || mode == .both)
                 ? "Procesando metadatos 360°..."
                 : "Guardando en Apple Fotos..."
         }
 
-        let shotLocation = LocationManager.shared.getBestLocation(for: item.filename)
         let filesToSave = PhotoStitcher.shared.processDownloadedFile(
             at: destinationURL,
-            isVideo: item.isVideo,
+            isVideo: false,
             mode: mode,
             location: shotLocation
         )
+        var cleanup = filesToSave
+        if !cleanup.contains(destinationURL) {
+            cleanup.append(destinationURL)
+        }
+        saveFilesToPhotosLibrary(
+            filesToSave: filesToSave,
+            cleanupURLs: cleanup,
+            item: item,
+            mode: mode,
+            location: shotLocation,
+            completion: completion
+        )
+    }
 
+    private func saveFilesToPhotosLibrary(
+        filesToSave: [URL],
+        cleanupURLs: [URL],
+        item: SDFileItem,
+        mode: StitchMode,
+        location: CLLocation?,
+        completion: @escaping (Bool, String) -> Void
+    ) {
         PHPhotoLibrary.shared().performChanges({
             for fileURL in filesToSave {
                 if item.isVideo {
                     let req = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
-                    if let loc = shotLocation {
+                    if let loc = location {
                         req?.location = loc
                     }
                 } else {
                     let req = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
-                    if let loc = shotLocation {
+                    if let loc = location {
                         req?.location = loc
                     }
                 }
             }
         }) { success, saveError in
-            try? FileManager.default.removeItem(at: destinationURL)
-            for fileURL in filesToSave where fileURL != destinationURL {
-                try? FileManager.default.removeItem(at: fileURL)
+            for url in cleanupURLs {
+                try? FileManager.default.removeItem(at: url)
             }
 
             if success {
@@ -505,7 +587,14 @@ public class MediaDownloader: ObservableObject {
                 if success {
                     let msg: String
                     if item.isVideo {
-                        msg = "¡Video guardado en tu Carrete de Apple Fotos!"
+                        switch mode {
+                        case .stitched360:
+                            msg = "¡Video 360° (con metadatos espaciales) guardado en Apple Fotos!"
+                        case .both:
+                            msg = "¡Se guardaron ambos videos (Original + 360°) en Apple Fotos!"
+                        case .original:
+                            msg = "¡Video original guardado en Apple Fotos!"
+                        }
                     } else {
                         switch mode {
                         case .stitched360:
