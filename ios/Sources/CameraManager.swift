@@ -594,6 +594,9 @@ public class CameraManager: ObservableObject {
                     if rvalVal == 0 || rvalVal == 128 {
                         self.isRecording = true
                         self.lastStatusMessage = "Grabando video (\(msgId))..."
+                    } else if rvalVal == -1 {
+                        // La cámara suele emitir un rval:-1 transitorio antes del 0/128 al arrancar video
+                        print("⚠️ Respuesta transitoria en inicio de video (\(msgId), rval:-1)")
                     } else {
                         self.isRecording = false
                         self.lastStatusMessage = "❌ Error al iniciar video (\(msgId), rval:\(rvalVal))"
