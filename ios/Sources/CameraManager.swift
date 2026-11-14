@@ -430,7 +430,8 @@ public class CameraManager: ObservableObject {
 
     private func handleParsedJSON(_ obj: [String: Any]) {
         let msgId = obj["msg_id"] as? Int ?? 0
-        let rval = obj["rval"] as? Int ?? -1
+        let rvalOpt = obj["rval"] as? Int
+        let rval = rvalOpt ?? -1
 
         // Si había un callback esperando este msgId, ejecutar el primero en cola (FIFO)
         var callbackToRun: (([String: Any]) -> Void)? = nil
@@ -589,20 +590,24 @@ public class CameraManager: ObservableObject {
                 }
 
             case 513, 4620, 4623, 5028: // INICIO VIDEO (513: Normal, 4620: Corto, 4623: Timelapse, 5028: SlowMo)
-                if rval == 0 || rval == 128 {
-                    self.isRecording = true
-                    self.lastStatusMessage = "Grabando video (\(msgId))..."
-                } else {
-                    self.isRecording = false
-                    self.lastStatusMessage = "❌ Error al iniciar video (\(msgId), rval:\(rval))"
+                if let rvalVal = rvalOpt {
+                    if rvalVal == 0 || rvalVal == 128 {
+                        self.isRecording = true
+                        self.lastStatusMessage = "Grabando video (\(msgId))..."
+                    } else {
+                        self.isRecording = false
+                        self.lastStatusMessage = "❌ Error al iniciar video (\(msgId), rval:\(rvalVal))"
+                    }
                 }
 
             case 514: // FIN VIDEO
-                if rval == 0 || rval == 128 {
-                    self.isRecording = false
-                    self.lastStatusMessage = "Video guardado."
-                } else {
-                    self.lastStatusMessage = "❌ Error al detener video (514, rval:\(rval))"
+                if let rvalVal = rvalOpt {
+                    if rvalVal == 0 || rvalVal == 128 {
+                        self.isRecording = false
+                        self.lastStatusMessage = "Video guardado."
+                    } else {
+                        self.lastStatusMessage = "❌ Error al detener video (514, rval:\(rvalVal))"
+                    }
                 }
 
             case 6165: // GYRO_CALIB
