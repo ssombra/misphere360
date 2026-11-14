@@ -565,7 +565,21 @@ public class CameraManager: ObservableObject {
                     self.lastStatusMessage = "❌ msgId \(msgId) RECHAZADO (rval:\(rval))"
                 }
 
-            case 4611, 4612, 4614, 4615, 4618, 4621, 4872, 4916, 5136, 5137, 5168, 5169, 5171, 5172, 6145, 6151, 6156:
+            case 4611: // SET_CAMERA_MODE / Cambio físico de modo en la cámara (0=Video, 1=Foto)
+                if let newMode = (obj["param"] as? Int) ?? Int(obj["param"] as? String ?? ""),
+                   (newMode == 0 || newMode == 1) {
+                    if self.currentMode != newMode {
+                        self.currentMode = newMode
+                        UserDefaults.standard.set(newMode, forKey: "cam_currentMode")
+                        self.lastStatusMessage = newMode == 1 ? "Modo Foto (cámara)" : "Modo Video (cámara)"
+                    }
+                } else if rval == 0 {
+                    print("✅ Modo registrado con éxito en la cámara (msgId=4611)")
+                } else if let rvalVal = rvalOpt {
+                    print("⚠️ Aviso: Cámara respondió rval=\(rvalVal) al msgId=4611")
+                }
+
+            case 4612, 4614, 4615, 4618, 4621, 4872, 4916, 5136, 5137, 5168, 5169, 5171, 5172, 6145, 6151, 6156:
                 if rval == 0 {
                     print("✅ Parámetro registrado con éxito en la memoria de la cámara (msgId=\(msgId))")
                 } else {
