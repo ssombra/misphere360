@@ -226,10 +226,13 @@ struct VideoPreviewView: View {
     @ObservedObject private var localLibrary = LocalLibraryManager.shared
     @ObservedObject private var downloader = MediaDownloader.shared
     @State private var showUIControls = true
+    @State private var projectionMode: PhotoProjectionMode = .normal
     @State private var showDeleteConfirm = false
     @State private var showInfoSheet = false
     @State private var localSaveMessage: String? = nil
     @State private var showLocalSaveAlert = false
+
+    private let brandOrange = Color(red: 1.0, green: 0.42, blue: 0.0)
 
     private var formattedFileSize: String {
         if controller.fileSizeBytes > 0 {
@@ -292,7 +295,7 @@ struct VideoPreviewView: View {
                 }
             }
 
-            // Controles superpuestos
+            // Controles superpuestos (unificados con PhotoPreviewView)
             if showUIControls {
                 VStack {
                     // Barra superior
@@ -302,11 +305,16 @@ struct VideoPreviewView: View {
                             dismiss()
                         } label: {
                             Image(systemName: "xmark")
-                                .font(.system(size: 18, weight: .bold))
+                                .font(.system(size: 16, weight: .bold))
                                 .foregroundColor(.white)
-                                .padding(10)
-                                .background(Color.black.opacity(0.55))
+                                .frame(width: 42, height: 42)
+                                .background(.ultraThinMaterial)
+                                .background(Color.black.opacity(0.45))
                                 .clipShape(Circle())
+                                .overlay(
+                                    Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                                )
+                                .shadow(color: Color.black.opacity(0.35), radius: 6, x: 0, y: 3)
                         }
 
                         Spacer()
@@ -322,71 +330,16 @@ struct VideoPreviewView: View {
 
                         Spacer()
 
-                        HStack(spacing: 10) {
-                            Button {
-                                showInfoSheet = true
-                            } label: {
-                                Image(systemName: "info.circle")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .padding(10)
-                                    .background(Color.black.opacity(0.55))
-                                    .clipShape(Circle())
-                            }
-
-                            Menu {
-                                if !localLibrary.isDownloaded(item) {
-                                    Button {
-                                        downloader.downloadToLocalLibrary(item: item) { _, msg in
-                                            localSaveMessage = msg
-                                            showLocalSaveAlert = true
-                                        }
-                                    } label: {
-                                        Label("Guardar en Local (App)", systemImage: "iphone.and.arrow.forward")
-                                    }
-                                } else {
-                                    Label("Ya guardado en Local", systemImage: "checkmark.circle.fill")
-                                }
-
-                                Divider()
-
-                                Section("Exportar a Apple Fotos") {
-                                    ForEach(StitchMode.allCases) { mode in
-                                        Button {
-                                            onDownloadRequested?(mode)
-                                        } label: {
-                                            Label(mode.title, systemImage: mode.systemImage)
-                                        }
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "arrow.down.circle.fill")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.blue)
-                                    .padding(8)
-                                    .background(Color.black.opacity(0.55))
-                                    .clipShape(Circle())
-                            }
-
-                            Button {
-                                showDeleteConfirm = true
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.red)
-                                    .padding(10)
-                                    .background(Color.black.opacity(0.55))
-                                    .clipShape(Circle())
-                            }
-                        }
+                        Color.clear.frame(width: 42, height: 42)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 10)
 
                     Spacer()
 
-                    // Barra inferior: controles de reproducción
-                    HStack(spacing: 12) {
+                    // Barra inferior: reproducción + 4 botones flotantes
+                    VStack(spacing: 14) {
+                        HStack(spacing: 12) {
                             Button {
                                 controller.togglePlayPause()
                             } label: {
@@ -414,7 +367,7 @@ struct VideoPreviewView: View {
                                     }
                                 }
                             )
-                            .tint(.white)
+                            .tint(brandOrange)
 
                             Text(formatTime(controller.duration))
                                 .font(.caption.monospacedDigit())
@@ -428,13 +381,130 @@ struct VideoPreviewView: View {
                                     .foregroundColor(.white)
                                     .frame(width: 32, height: 32)
                             }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial)
+                        .background(Color.black.opacity(0.45))
+                        .cornerRadius(16)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                        )
+                        .padding(.horizontal, 16)
+
+                        HStack(spacing: 22) {
+                            // 1. Borrar con confirmación
+                            Button {
+                                showDeleteConfirm = true
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(.red)
+                                    .frame(width: 50, height: 50)
+                                    .background(.ultraThinMaterial)
+                                    .background(Color.black.opacity(0.45))
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                                    )
+                                    .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
+                            }
+
+                            // 2. Información del video ("i")
+                            Button {
+                                showInfoSheet = true
+                            } label: {
+                                Image(systemName: "info.circle")
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 50, height: 50)
+                                    .background(.ultraThinMaterial)
+                                    .background(Color.black.opacity(0.45))
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                                    )
+                                    .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
+                            }
+
+                            // 3. Descarga / Guardar
+                            Menu {
+                                if !localLibrary.isDownloaded(item) {
+                                    Button {
+                                        downloader.downloadToLocalLibrary(item: item) { _, msg in
+                                            localSaveMessage = msg
+                                            showLocalSaveAlert = true
+                                        }
+                                    } label: {
+                                        Label("Guardar en Local (App)", systemImage: "iphone.and.arrow.forward")
+                                    }
+                                } else {
+                                    Label("Ya guardado en Local", systemImage: "checkmark.circle.fill")
+                                }
+
+                                Divider()
+
+                                Section("Exportar a Apple Fotos") {
+                                    ForEach(StitchMode.allCases) { mode in
+                                        Button {
+                                            onDownloadRequested?(mode)
+                                        } label: {
+                                            Label(mode.title, systemImage: mode.systemImage)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "square.and.arrow.down")
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 50, height: 50)
+                                    .background(.ultraThinMaterial)
+                                    .background(Color.black.opacity(0.45))
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+                                    )
+                                    .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
+                            }
+
+                            // 4. Modo de proyección 360°
+                            Menu {
+                                Section("Modo de visualización") {
+                                    ForEach(PhotoProjectionMode.allCases) { mode in
+                                        Button {
+                                            let impact = UIImpactFeedbackGenerator(style: .light)
+                                            impact.impactOccurred()
+                                            projectionMode = mode
+                                            controller.renderer.projectionMode = mode
+                                        } label: {
+                                            if projectionMode == mode {
+                                                Label(mode.rawValue, systemImage: "checkmark")
+                                            } else {
+                                                Label(mode.rawValue, systemImage: mode.systemImage)
+                                            }
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: projectionMode.systemImage)
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(projectionMode == .normal ? .white : brandOrange)
+                                    .frame(width: 50, height: 50)
+                                    .background(.ultraThinMaterial)
+                                    .background(Color.black.opacity(0.45))
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle().stroke(
+                                            projectionMode == .normal ? Color.white.opacity(0.18) : brandOrange.opacity(0.6),
+                                            lineWidth: projectionMode == .normal ? 0.5 : 1.0
+                                        )
+                                    )
+                                    .shadow(color: Color.black.opacity(0.3), radius: 6, x: 0, y: 3)
+                            }
+                        }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.65))
-                    .cornerRadius(16)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 24)
                 }
             }
 

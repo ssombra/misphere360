@@ -32,9 +32,32 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
             }
         }
     }
+    @Published public var projectionMode: PhotoProjectionMode = .normal {
+        didSet {
+            switch projectionMode {
+            case .pano360:
+                mode = .panorama360
+            case .normal, .crystalBall:
+                mode = .interactive360
+                pitch = 0.0
+                fovDeg = 75.0
+            case .fisheye:
+                mode = .interactive360
+                pitch = 0.0
+                fovDeg = 130.0
+            case .littlePlanet, .rabbitHole:
+                mode = .interactive360
+                pitch = 0.0
+                fovDeg = 95.0
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.mtkView?.setNeedsDisplay()
+            }
+        }
+    }
     @Published public var yaw: Float = 0.0
     @Published public var pitch: Float = 0.0
-    @Published public var fovDeg: Float = 85.0
+    @Published public var fovDeg: Float = 75.0
     @Published public var isLutLoaded: Bool = false
     @Published public var isExpanded: Bool = false
 
@@ -60,6 +83,8 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         var pitch: Float
         var tanHalfFov: Float
         var aspect: Float
+        var projMode: Int32
+        var fovDeg: Float
     }
 
     public override init() {
@@ -258,7 +283,9 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
     public func handlePinch(scale: CGFloat) {
         guard scale > 0 else { return }
         let newFov = fovDeg / Float(scale)
-        fovDeg = max(35.0, min(115.0, newFov))
+        let minFov: Float = (projectionMode == .fisheye) ? 75.0 : 25.0
+        let maxFov: Float = (projectionMode == .fisheye) ? 165.0 : (projectionMode == .littlePlanet || projectionMode == .rabbitHole) ? 140.0 : 115.0
+        fovDeg = max(minFov, min(maxFov, newFov))
         DispatchQueue.main.async { [weak self] in
             self?.mtkView?.setNeedsDisplay()
         }
@@ -267,7 +294,11 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
     public func resetOrientation() {
         yaw = 0.0
         pitch = 0.0
-        fovDeg = 85.0
+        switch projectionMode {
+        case .fisheye: fovDeg = 130.0
+        case .littlePlanet, .rabbitHole: fovDeg = 95.0
+        case .normal, .crystalBall, .pano360: fovDeg = 75.0
+        }
         DispatchQueue.main.async { [weak self] in
             self?.mtkView?.setNeedsDisplay()
         }
@@ -313,12 +344,24 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         let fovRad = fovDeg * (.pi / 180.0)
         let tanHalfFov = tan(fovRad * 0.5)
 
+        let projIndex: Int32
+        switch projectionMode {
+        case .normal: projIndex = 0
+        case .fisheye: projIndex = 1
+        case .littlePlanet: projIndex = 2
+        case .rabbitHole: projIndex = 3
+        case .crystalBall: projIndex = 4
+        case .pano360: projIndex = 0
+        }
+
         var uniforms = Uniforms(
             mode: Int32(mode.rawValue),
             yaw: yaw,
             pitch: pitch,
             tanHalfFov: tanHalfFov,
-            aspect: aspect
+            aspect: aspect,
+            projMode: projIndex,
+            fovDeg: fovDeg
         )
 
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)

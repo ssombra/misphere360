@@ -12,6 +12,8 @@ struct Uniforms {
     float pitch;        // Ángulo de elevación vertical (radianes)
     float tanHalfFov;   // tan(fov / 2)
     float aspect;       // Relación de aspecto (ancho / alto)
+    int projMode;       // 0 = Normal, 1 = Fisheye, 2 = Little Planet, 3 = Rabbit Hole, 4 = Crystal Ball
+    float fovDeg;       // Campo de visión en grados
 };
 
 // Conversión ultra-rápida por hardware YUV (NV12 BT.601 Video Range) a RGB
@@ -65,14 +67,58 @@ fragment float4 stitchFragmentShader(
     }
 
     float2 eqUV;
+    float rimGlow = 0.0;
 
     if (u.mode == 1) {
-        // Modo 1: Panorama Equirrectangular 360° plano
-        eqUV = float2(in.ndc.x * 0.5 + 0.5, 0.5 - in.ndc.y * 0.5);
+        // Modo 1: Panorama Equirrectangular 360° plano (proporción 2:1 centrada)
+        float maxHalfX = (u.aspect >= 2.0) ? (2.0 / u.aspect) : 1.0;
+        float maxHalfY = (u.aspect < 2.0) ? (u.aspect / 2.0) : 1.0;
+        if (abs(in.ndc.x) > maxHalfX || abs(in.ndc.y) > maxHalfY) {
+            return float4(0.0, 0.0, 0.0, 1.0);
+        }
+        float uCoord = (in.ndc.x / maxHalfX) * 0.5 + 0.5;
+        float vCoord = 0.5 - (in.ndc.y / maxHalfY) * 0.5;
+        eqUV = float2(uCoord, vCoord);
     } else {
-        // Modo 0: Esfera 360° Interactiva con proyección de perspectiva
+        // Modo 0: Esfera 360° Interactiva con modos de proyección
         const float PI = 3.14159265358979323846;
-        float3 dir = normalize(float3(in.ndc.x * u.tanHalfFov * u.aspect, in.ndc.y * u.tanHalfFov, -1.0));
+        float3 dir;
+
+        if (u.projMode == 1) {
+            // Fisheye (equidistante gran angular)
+            float2 p = float2(in.ndc.x * u.aspect, in.ndc.y);
+            float r = length(p);
+            float halfFovRad = (u.fovDeg * PI) / 360.0;
+            float theta = r * halfFovRad;
+            if (theta > PI) {
+                return float4(0.03, 0.03, 0.04, 1.0);
+            }
+            dir = (r > 0.0001) ? float3((p / r) * sin(theta), -cos(theta)) : float3(0.0, 0.0, -1.0);
+        } else if (u.projMode == 2) {
+            // Little Planet (estereográfica desde polo norte hacia nadir)
+            float2 p = float2(in.ndc.x * u.aspect, in.ndc.y) * (u.tanHalfFov * 1.4);
+            float r2 = dot(p, p);
+            dir = float3(2.0 * p.x, r2 - 1.0, -2.0 * p.y) / (r2 + 1.0);
+        } else if (u.projMode == 3) {
+            // Rabbit Hole (estereográfica inversa hacia cenit)
+            float2 p = float2(in.ndc.x * u.aspect, in.ndc.y) * (u.tanHalfFov * 1.4);
+            float r2 = dot(p, p);
+            dir = float3(2.0 * p.x, 1.0 - r2, -2.0 * p.y) / (r2 + 1.0);
+        } else if (u.projMode == 4) {
+            // Crystal Ball (esfera exterior de cristal)
+            float radius = clamp(0.85 * (75.0 / max(10.0, u.fovDeg)), 0.35, 1.35);
+            float2 p = float2(in.ndc.x * u.aspect, in.ndc.y) / radius;
+            float r2 = dot(p, p);
+            if (r2 > 1.0) {
+                return float4(0.03, 0.03, 0.04, 1.0);
+            }
+            float z = sqrt(1.0 - r2);
+            dir = normalize(float3(p.x, p.y, -z));
+            rimGlow = pow(1.0 - z, 3.0) * 0.25;
+        } else {
+            // Normal (rectilíneo)
+            dir = normalize(float3(in.ndc.x * u.tanHalfFov * u.aspect, in.ndc.y * u.tanHalfFov, -1.0));
+        }
 
         // Rotación de cabeceo (Pitch)
         float cp = cos(u.pitch);
@@ -106,5 +152,6 @@ fragment float4 stitchFragmentShader(
         col2 = sampleYUV(yTex, uvTex, s, uv2);
     }
 
-    return mix(col2, col1, w1);
+    float4 result = mix(col2, col1, w1);
+    return float4(clamp(result.rgb + float3(rimGlow), 0.0, 1.0), result.a);
 }
