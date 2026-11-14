@@ -585,11 +585,20 @@ public class CameraManager: ObservableObject {
                     }
                 }
 
-            case 5028: // INICIO VIDEO
-                if rval == 0 { self.isRecording = true; self.lastStatusMessage = "Grabando video..." }
+            case 513, 4620, 4623, 5028: // INICIO VIDEO (513: Normal, 4620: Corto, 4623: Timelapse, 5028: SlowMo)
+                if rval == 0 {
+                    self.isRecording = true
+                    self.lastStatusMessage = "Grabando video (\(msgId))..."
+                } else {
+                    self.isRecording = false
+                    self.lastStatusMessage = "❌ Error al iniciar video (\(msgId), rval:\(rval))"
+                }
 
             case 514: // FIN VIDEO
-                if rval == 0 { self.isRecording = false; self.lastStatusMessage = "Video guardado." }
+                if rval == 0 {
+                    self.isRecording = false
+                    self.lastStatusMessage = "Video guardado."
+                }
 
             case 6165: // GYRO_CALIB
                 if rval == 0 { self.lastStatusMessage = "Giroscopio calibrado." }
@@ -600,6 +609,10 @@ public class CameraManager: ObservableObject {
                     LocationManager.shared.recordCurrentShotLocation()
                     self.lastStatusMessage = "📸 Foto guardada en SD (8193)"
                     NotificationCenter.default.post(name: NSNotification.Name("CameraPhotoSavedNotification"), object: nil)
+                } else if msgId == 8192 {
+                    // Video terminado y guardado en microSD (fundamental para Video Corto automático)
+                    self.isRecording = false
+                    self.lastStatusMessage = "🎥 Video guardado en SD (8192)"
                 }
                 self.fetchBatteryStatus()
                 self.fetchStorageStatus()
@@ -989,11 +1002,22 @@ public class CameraManager: ObservableObject {
         if isRecording {
             sendCommand(msgId: 514, param: nil)
         } else {
-            if videoShort > 0 || videoTimelapse > 0 || videoSlowMo > 0 {
-                // Sub-modos de video usan 4623 (VIDEO_LONGPRESS)
+            if videoShort > 0 {
+                // Video corto (micro): 4620 (AMBA_MSGID_START_VIDEO_MICRO)
+                lastStatusMessage = "Iniciando video corto (4620)..."
+                sendCommand(msgId: 4620, param: nil)
+            } else if videoTimelapse > 0 {
+                // Video con retardo / timelapse: 4623 (AMBA_MSGID_START_VIDEO_DELAY)
+                lastStatusMessage = "Iniciando video timelapse (4623)..."
                 sendCommand(msgId: 4623, param: nil)
-            } else {
+            } else if videoSlowMo > 0 {
+                // Video lento (Slow Motion): 5028 (AMBA_MSGID_START_VIDEO_SLOW)
+                lastStatusMessage = "Iniciando cámara lenta (5028)..."
                 sendCommand(msgId: 5028, param: nil)
+            } else {
+                // Video normal estándar: 513 (AMBA_MSGID_START_VIDEO_NORMAL)
+                lastStatusMessage = "Iniciando grabación de video (513)..."
+                sendCommand(msgId: 513, param: nil)
             }
         }
     }
