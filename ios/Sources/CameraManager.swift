@@ -720,6 +720,11 @@ public class CameraManager: ObservableObject {
         sendCommand(msgId: 6145, param: "\(buzzerLevel)")
         sendCommand(msgId: 6151, param: "\(autoOffMinutes)")
         sendCommand(msgId: 6156, param: "\(ledEnabled ? 1 : 0)")
+
+        // Enviar coordenadas GPS actuales al conectar con el nuevo formato 4917
+        DispatchQueue.main.async {
+            LocationManager.shared.syncCurrentLocationToCameraOnly()
+        }
     }
 
     private func updatePhotoSubMode() {
@@ -1099,9 +1104,15 @@ public class CameraManager: ObservableObject {
     // MARK: - GPS y Hardware
 
     public func setGPS(latitude: Double, longitude: Double, altitude: Double) {
-        guard isConnected else { return }
-        let gpsString = String(format: "%.6f,%.6f,%.1f", latitude, longitude, altitude)
-        sendCommand(msgId: 4917, param: gpsString)
+        guard isConnected, sessionToken > 0 else { return }
+        // Formato oficial Ambarella / Mi Sphere verificado en tcpdump (llaves separadas como String)
+        let packet: [String: Any] = [
+            "msg_id": 4917,
+            "lat": String(format: "%.6f", latitude),
+            "lon": String(format: "%.6f", longitude),
+            "alt": String(format: "%.6f", altitude)
+        ]
+        sendCustomPacket(packet, msgId: 4917)
     }
 
     public func powerOffCamera() {

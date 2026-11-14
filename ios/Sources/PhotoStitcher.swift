@@ -149,8 +149,22 @@ public class PhotoStitcher {
         return UIImage(contentsOfFile: fileURL.path)
     }
 
+    private func hasEmbeddedGPS(at imageURL: URL) -> Bool {
+        guard let src = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+              let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+              gps[kCGImagePropertyGPSLatitude] != nil,
+              gps[kCGImagePropertyGPSLongitude] != nil else {
+            return false
+        }
+        return true
+    }
+
     /// Incrusta el bloque EXIF GPS oficial en el archivo JPEG sin recomprimir los píxeles
     public func embedGPS(into imageURL: URL, location: CLLocation) {
+        // Si la cámara ya incrustó las coordenadas GPS nativas en la SD, respetarlas intactas
+        if hasEmbeddedGPS(at: imageURL) { return }
+
         guard let src = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
               let uti = CGImageSourceGetType(src) else { return }
 
