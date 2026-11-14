@@ -1,5 +1,7 @@
 import SwiftUI
 import CoreLocation
+import ImageIO
+import AVFoundation
 
 /// Previsualización a pantalla completa en 360° interactiva antes de descargar la foto
 public struct PhotoPreviewView: View {
@@ -420,9 +422,16 @@ struct PhotoInfoSheetView: View {
     let item: SDFileItem
     let fileSizeFormatted: String
     @Environment(\.dismiss) var dismiss
+    @State private var embeddedLocation: CLLocation? = nil
 
-    var bestLocation: CLLocation? {
-        LocationManager.shared.getBestLocation(for: item.filename)
+    private var resolvedLocation: (location: CLLocation, isEmbedded: Bool)? {
+        if let embedded = embeddedLocation {
+            return (embedded, true)
+        }
+        if let historyLoc = LocationManager.shared.getBestLocation(for: item.filename) {
+            return (historyLoc, false)
+        }
+        return nil
     }
 
     var body: some View {
@@ -443,11 +452,21 @@ struct PhotoInfoSheetView: View {
                 }
 
                 Section("Geolocalización GPS") {
-                    if let loc = bestLocation {
-                        infoRow(icon: "checkmark.circle.fill", label: "Estado", value: "GPS Vinculado con iPhone", valueColor: .green)
+                    if let resolved = resolvedLocation {
+                        let loc = resolved.location
+                        infoRow(
+                            icon: "checkmark.circle.fill",
+                            label: "Estado",
+                            value: resolved.isEmbedded ? "GPS incrustado en archivo" : "GPS Vinculado con iPhone",
+                            valueColor: .green
+                        )
                         infoRow(icon: "location.north.line", label: "Coordenadas", value: String(format: "%.5f, %.5f", loc.coordinate.latitude, loc.coordinate.longitude))
-                        infoRow(icon: "mountain.2", label: "Altitud", value: String(format: "%.1f m", loc.altitude))
-                        infoRow(icon: "scope", label: "Precisión", value: String(format: "±%.1f m", loc.horizontalAccuracy))
+                        if loc.verticalAccuracy >= 0 {
+                            infoRow(icon: "mountain.2", label: "Altitud", value: String(format: "%.1f m", loc.altitude))
+                        }
+                        if loc.horizontalAccuracy >= 0 {
+                            infoRow(icon: "scope", label: "Precisión", value: String(format: "±%.1f m", loc.horizontalAccuracy))
+                        }
                     } else {
                         infoRow(icon: "location.slash", label: "Estado", value: "Sin datos GPS vinculados", valueColor: .secondary)
                         Text("Para registrar la ubicación en cada foto, asegúrate de mantener la app abierta durante las tomas.")
@@ -464,9 +483,115 @@ struct PhotoInfoSheetView: View {
                         .fontWeight(.semibold)
                 }
             }
+            .onAppear {
+                loadEmbeddedLocation()
+            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+    }
+
+    private func loadEmbeddedLocation() {
+        let item = self.item
+        DispatchQueue.global(qos: .userInitiated).async {
+            let found = Self.extractEmbeddedLocation(for: item)
+            DispatchQueue.main.async {
+                self.embeddedLocation = found
+            }
+        }
+    }
+
+    private static func extractEmbeddedLocation(for item: SDFileItem) -> CLLocation? {
+        guard let localAsset = LocalLibraryManager.shared.asset(for: item.id) else {
+            return nil
+        }
+
+        if item.isVideo {
+            let videoURL = LocalLibraryManager.shared.originalURL(for: localAsset)
+            return extractVideoLocation(from: videoURL)
+        }
+
+        let candidateURLs = [
+            LocalLibraryManager.shared.originalURL(for: localAsset),
+            LocalLibraryManager.shared.stitchedURL(for: localAsset)
+        ].compactMap { $0 }
+
+        for url in candidateURLs {
+            if let loc = extractImageGPS(from: url) {
+                return loc
+            }
+        }
+        return nil
+    }
+
+    private static func extractImageGPS(from url: URL) -> CLLocation? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any],
+              let rawLat = (gps[kCGImagePropertyGPSLatitude] as? NSNumber)?.doubleValue,
+              let rawLon = (gps[kCGImagePropertyGPSLongitude] as? NSNumber)?.doubleValue else {
+            return nil
+        }
+
+        let latRef = (gps[kCGImagePropertyGPSLatitudeRef] as? String)?.uppercased() ?? "N"
+        let lonRef = (gps[kCGImagePropertyGPSLongitudeRef] as? String)?.uppercased() ?? "E"
+        let lat = latRef == "S" ? -abs(rawLat) : abs(rawLat)
+        let lon = lonRef == "W" ? -abs(rawLon) : abs(rawLon)
+
+        let rawAlt = (gps[kCGImagePropertyGPSAltitude] as? NSNumber)?.doubleValue
+        let altRef = (gps[kCGImagePropertyGPSAltitudeRef] as? NSNumber)?.intValue ?? 0
+        let altitude = rawAlt.map { altRef == 1 ? -abs($0) : $0 } ?? 0.0
+        let verticalAccuracy: CLLocationAccuracy = rawAlt != nil ? 5.0 : -1.0
+        let dop = (gps[kCGImagePropertyGPSDOP] as? NSNumber)?.doubleValue
+        let horizontalAccuracy: CLLocationAccuracy = dop ?? -1.0
+
+        return CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
+            altitude: altitude,
+            horizontalAccuracy: horizontalAccuracy,
+            verticalAccuracy: verticalAccuracy,
+            timestamp: Date()
+        )
+    }
+
+    private static func extractVideoLocation(from url: URL) -> CLLocation? {
+        let asset = AVURLAsset(url: url)
+        let items = AVMetadataItem.metadataItems(
+            from: asset.commonMetadata,
+            filteredByIdentifier: .commonIdentifierLocation
+        )
+        guard let rawISO = items.first?.stringValue else { return nil }
+        return parseISO6709Location(rawISO)
+    }
+
+    private static func parseISO6709Location(_ iso: String) -> CLLocation? {
+        // Formato estándar ISO 6709 usado en QuickTime/MP4: "+19.4326-099.1332+2240.0/"
+        let pattern = #"^([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)?"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: iso, range: NSRange(iso.startIndex..., in: iso)),
+              let latRange = Range(match.range(at: 1), in: iso),
+              let lonRange = Range(match.range(at: 2), in: iso),
+              let lat = Double(iso[latRange]),
+              let lon = Double(iso[lonRange]) else {
+            return nil
+        }
+
+        var altitude: CLLocationDistance = 0.0
+        var verticalAccuracy: CLLocationAccuracy = -1.0
+        if match.range(at: 3).location != NSNotFound,
+           let altRange = Range(match.range(at: 3), in: iso),
+           let alt = Double(iso[altRange]) {
+            altitude = alt
+            verticalAccuracy = 5.0
+        }
+
+        return CLLocation(
+            coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
+            altitude: altitude,
+            horizontalAccuracy: -1.0,
+            verticalAccuracy: verticalAccuracy,
+            timestamp: Date()
+        )
     }
 
     private func infoRow(icon: String, label: String, value: String, valueColor: Color = .primary) -> some View {
