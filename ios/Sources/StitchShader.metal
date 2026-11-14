@@ -105,8 +105,9 @@ fragment float4 stitchFragmentShader(
             float r2 = dot(p, p);
             dir = float3(2.0 * p.x, 1.0 - r2, -2.0 * p.y) / (r2 + 1.0);
         } else if (u.projMode == 4) {
-            // Crystal Ball (esfera exterior de cristal)
-            float radius = clamp(0.85 * (75.0 / max(10.0, u.fovDeg)), 0.35, 1.35);
+            // Crystal Ball (esfera exterior de cristal ajustada al lado menor de pantalla)
+            float baseRadius = min(u.aspect, 1.0) * 0.88;
+            float radius = clamp(baseRadius * (75.0 / max(10.0, u.fovDeg)), baseRadius * 0.45, baseRadius * 2.2);
             float2 p = float2(in.ndc.x * u.aspect, in.ndc.y) / radius;
             float r2 = dot(p, p);
             if (r2 > 1.0) {

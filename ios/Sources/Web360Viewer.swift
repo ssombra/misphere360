@@ -270,8 +270,9 @@ public struct Web360Viewer: UIViewRepresentable {
                 float r2 = dot(p, p);
                 dir = vec3(2.0 * p.x, 1.0 - r2, -2.0 * p.y) / (r2 + 1.0);
               } else if (uProjMode == 4) {
-                // Crystal Ball (esfera exterior de cristal)
-                float radius = clamp(0.85 * (75.0 / max(10.0, uFovDeg)), 0.35, 1.35);
+                // Crystal Ball (esfera exterior de cristal ajustada al lado menor de pantalla)
+                float baseRadius = min(uAspect, 1.0) * 0.88;
+                float radius = clamp(baseRadius * (75.0 / max(10.0, uFovDeg)), baseRadius * 0.45, baseRadius * 2.2);
                 vec2 p = vec2(vNdc.x * uAspect, vNdc.y) / radius;
                 float r2 = dot(p, p);
                 if (r2 > 1.0) {
@@ -384,7 +385,7 @@ public struct Web360Viewer: UIViewRepresentable {
                 );
                 if (lastDist > 0) {
                   const factor = dist / lastDist;
-                  const maxFov = (projMode === 1) ? 165.0 : (projMode === 2 || projMode === 3) ? 140.0 : 115.0;
+                  const maxFov = (projMode === 1) ? 165.0 : (projMode === 4) ? 150.0 : (projMode === 2 || projMode === 3) ? 140.0 : 115.0;
                   const minFov = (projMode === 1) ? 75.0 : 25.0;
                   fovDeg = Math.max(minFov, Math.min(maxFov, fovDeg / factor));
                 }

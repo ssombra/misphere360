@@ -284,7 +284,13 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
         guard scale > 0 else { return }
         let newFov = fovDeg / Float(scale)
         let minFov: Float = (projectionMode == .fisheye) ? 75.0 : 25.0
-        let maxFov: Float = (projectionMode == .fisheye) ? 165.0 : (projectionMode == .littlePlanet || projectionMode == .rabbitHole) ? 140.0 : 115.0
+        let maxFov: Float
+        switch projectionMode {
+        case .fisheye: maxFov = 165.0
+        case .crystalBall: maxFov = 150.0
+        case .littlePlanet, .rabbitHole: maxFov = 140.0
+        case .normal, .pano360: maxFov = 115.0
+        }
         fovDeg = max(minFov, min(maxFov, newFov))
         DispatchQueue.main.async { [weak self] in
             self?.mtkView?.setNeedsDisplay()
