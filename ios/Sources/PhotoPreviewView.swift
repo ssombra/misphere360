@@ -166,12 +166,14 @@ public struct PhotoPreviewView: View {
 
                         // 3. Descarga / Guardar en Fotos
                         Menu {
-                            ForEach(StitchMode.allCases) { mode in
-                                Button {
-                                    onDownloadRequested?(mode)
-                                    dismiss()
-                                } label: {
-                                    Label(mode.title, systemImage: mode.systemImage)
+                            Section("Exportar a Apple Fotos") {
+                                ForEach(StitchMode.allCases) { mode in
+                                    Button {
+                                        onDownloadRequested?(mode)
+                                        dismiss()
+                                    } label: {
+                                        Label(mode.title, systemImage: mode.systemImage)
+                                    }
                                 }
                             }
                         } label: {

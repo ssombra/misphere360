@@ -1294,18 +1294,24 @@ public class CameraManager: ObservableObject {
             self.sendCommand(msgId: 1282, param: nil) { resp in
                 var files: [SDFileItem] = []
                 if let listing = resp["listing"] as? [[String: Any]] {
+                    let allUpperNames: Set<String> = Set(listing.flatMap { $0.keys }.map { $0.uppercased() })
                     for entry in listing {
                         for (fname, dateStr) in entry {
-                            if !fname.hasSuffix("/") {
-                                let isVid = fname.uppercased().hasSuffix(".MP4")
-                                let item = SDFileItem(
-                                    folder: folder,
-                                    filename: fname,
-                                    isVideo: isVid,
-                                    date: "\(dateStr)"
-                                )
-                                files.append(item)
+                            let upper = fname.uppercased()
+                            if fname.hasSuffix("/") || upper.hasSuffix(".THM") { continue }
+                            // Ocultar el proxy ligero AB.MP4 cuando existe su maestro AA.MP4
+                            if upper.hasSuffix("AB.MP4") {
+                                let aaPartner = String(upper.dropLast(6)) + "AA.MP4"
+                                if allUpperNames.contains(aaPartner) { continue }
                             }
+                            let isVid = upper.hasSuffix(".MP4")
+                            let item = SDFileItem(
+                                folder: folder,
+                                filename: fname,
+                                isVideo: isVid,
+                                date: "\(dateStr)"
+                            )
+                            files.append(item)
                         }
                     }
                 }

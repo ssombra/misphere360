@@ -223,9 +223,13 @@ struct VideoPreviewView: View {
 
     @Environment(\.dismiss) var dismiss
     @StateObject private var controller = VideoPreviewController()
+    @ObservedObject private var localLibrary = LocalLibraryManager.shared
+    @ObservedObject private var downloader = MediaDownloader.shared
     @State private var showUIControls = true
     @State private var showDeleteConfirm = false
     @State private var showInfoSheet = false
+    @State private var localSaveMessage: String? = nil
+    @State private var showLocalSaveAlert = false
 
     private var formattedFileSize: String {
         if controller.fileSizeBytes > 0 {
@@ -331,11 +335,28 @@ struct VideoPreviewView: View {
                             }
 
                             Menu {
-                                ForEach(StitchMode.allCases) { mode in
+                                if !localLibrary.isDownloaded(item) {
                                     Button {
-                                        onDownloadRequested?(mode)
+                                        downloader.downloadToLocalLibrary(item: item) { _, msg in
+                                            localSaveMessage = msg
+                                            showLocalSaveAlert = true
+                                        }
                                     } label: {
-                                        Label(mode.rawValue, systemImage: mode == .original ? "circle.grid.2x1" : "globe")
+                                        Label("Guardar en Local (App)", systemImage: "iphone.and.arrow.forward")
+                                    }
+                                } else {
+                                    Label("Ya guardado en Local", systemImage: "checkmark.circle.fill")
+                                }
+
+                                Divider()
+
+                                Section("Exportar a Apple Fotos") {
+                                    ForEach(StitchMode.allCases) { mode in
+                                        Button {
+                                            onDownloadRequested?(mode)
+                                        } label: {
+                                            Label(mode.title, systemImage: mode.systemImage)
+                                        }
                                     }
                                 }
                             } label: {
@@ -416,6 +437,21 @@ struct VideoPreviewView: View {
                     .padding(.bottom, 16)
                 }
             }
+
+            if downloader.isDownloading {
+                Color.black.opacity(0.65).ignoresSafeArea()
+                VStack(spacing: 14) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.3)
+                    Text(downloader.statusMessage)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(.white)
+                }
+                .padding(24)
+                .background(.ultraThinMaterial)
+                .cornerRadius(16)
+            }
         }
         .statusBar(hidden: !showUIControls)
         .onAppear {
@@ -423,6 +459,11 @@ struct VideoPreviewView: View {
         }
         .onDisappear {
             controller.stopAndCleanup()
+        }
+        .alert("Biblioteca Local", isPresented: $showLocalSaveAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(localSaveMessage ?? "")
         }
         .alert("¿Eliminar archivo de la microSD?", isPresented: $showDeleteConfirm) {
             Button("Cancelar", role: .cancel) {}
