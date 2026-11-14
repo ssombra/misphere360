@@ -613,4 +613,135 @@ public class MediaDownloader: ObservableObject {
             }
         }
     }
+
+    /// Guarda una captura (UIImage) de la vista previa actual en Apple Fotos con su ubicación GPS.
+    public func saveSnapshotImage(
+        _ image: UIImage,
+        for item: SDFileItem,
+        label: String,
+        completion: @escaping (Bool, String) -> Void
+    ) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async {
+                    completion(false, "Permiso denegado para guardar en Apple Fotos. Concede permiso en Ajustes > Mi Sphere 360.")
+                }
+                return
+            }
+
+            let shotLocation = LocationManager.shared.getBestLocation(for: item.filename)
+            PHPhotoLibrary.shared().performChanges({
+                let req = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                if let loc = shotLocation {
+                    req.location = loc
+                }
+            }) { success, error in
+                DispatchQueue.main.async {
+                    if success {
+                        completion(true, "¡Captura (\(label)) guardada en Apple Fotos!")
+                    } else {
+                        completion(false, error?.localizedDescription ?? "No se pudo guardar la captura en Fotos.")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Exporta un video plano ("Reframe") en el modo de proyección y relación de aspecto elegidos hacia Apple Fotos.
+    public func reframeAndExportVideo(
+        item: SDFileItem,
+        projectionMode: PhotoProjectionMode,
+        yaw: Float,
+        pitch: Float,
+        fovDeg: Float,
+        aspectPreset: ReframeAspectPreset,
+        completion: @escaping (Bool, String) -> Void
+    ) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async {
+                    completion(false, "Permiso denegado para guardar en Apple Fotos. Concede permiso en Ajustes > Mi Sphere 360.")
+                }
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.isDownloading = true
+                self.downloadProgress = 0.0
+                self.statusMessage = "Preparando \(item.filename)..."
+            }
+
+            let runReframe: (URL, Bool) -> Void = { sourceURL, shouldCleanupSource in
+                let shotLocation = LocationManager.shared.getBestLocation(for: item.filename)
+                let outURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("MiSphere_Reframe_\(UUID().uuidString).mp4")
+
+                DispatchQueue.main.async {
+                    self.statusMessage = "Renderizando \(projectionMode.rawValue) (\(aspectPreset.rawValue))..."
+                }
+
+                VideoStitcher.shared.stitchReframedVideo(
+                    inputURL: sourceURL,
+                    outputURL: outURL,
+                    projectionMode: projectionMode,
+                    yaw: yaw,
+                    pitch: pitch,
+                    fovDeg: fovDeg,
+                    aspectPreset: aspectPreset,
+                    location: shotLocation,
+                    progress: { [weak self] p in
+                        self?.downloadProgress = Float(p)
+                        self?.statusMessage = "Renderizando \(projectionMode.rawValue)... \(Int(p * 100))%"
+                    },
+                    completion: { [weak self] result in
+                        guard let self = self else { return }
+                        if shouldCleanupSource {
+                            try? FileManager.default.removeItem(at: sourceURL)
+                        }
+                        switch result {
+                        case .success(let finalURL):
+                            PHPhotoLibrary.shared().performChanges({
+                                let req = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: finalURL)
+                                if let loc = shotLocation {
+                                    req?.location = loc
+                                }
+                            }) { success, saveError in
+                                try? FileManager.default.removeItem(at: finalURL)
+                                DispatchQueue.main.async {
+                                    self.isDownloading = false
+                                    if success {
+                                        completion(true, "¡Video \(projectionMode.rawValue) (\(aspectPreset.rawValue)) guardado en Apple Fotos!")
+                                    } else {
+                                        completion(false, saveError?.localizedDescription ?? "Error al guardar el video en Fotos.")
+                                    }
+                                }
+                            }
+                        case .failure(let err):
+                            try? FileManager.default.removeItem(at: outURL)
+                            DispatchQueue.main.async {
+                                self.isDownloading = false
+                                completion(false, "Error al renderizar video: \(err.localizedDescription)")
+                            }
+                        }
+                    }
+                )
+            }
+
+            if let localAsset = LocalLibraryManager.shared.asset(for: item) {
+                let localOrig = LocalLibraryManager.shared.originalURL(for: localAsset)
+                runReframe(localOrig, false)
+            } else {
+                self.downloadToTemporaryFile(item: item) { tempURL in
+                    guard let tempURL = tempURL else {
+                        DispatchQueue.main.async {
+                            self.isDownloading = false
+                            completion(false, "No se pudo descargar \(item.filename) de la cámara.")
+                        }
+                        return
+                    }
+                    runReframe(tempURL, true)
+                }
+            }
+        }
+    }
 }

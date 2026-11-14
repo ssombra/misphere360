@@ -445,7 +445,45 @@ struct VideoPreviewView: View {
 
                                 Divider()
 
-                                Section("Exportar a Apple Fotos") {
+                                Section("Captura de esta vista") {
+                                    Button {
+                                        if let snap = controller.renderer.captureCurrentFrameSnapshot() {
+                                            downloader.saveSnapshotImage(snap, for: item, label: projectionMode.rawValue) { _, msg in
+                                                localSaveMessage = msg
+                                                showLocalSaveAlert = true
+                                            }
+                                        } else {
+                                            localSaveMessage = "No se pudo capturar el frame actual del video."
+                                            showLocalSaveAlert = true
+                                        }
+                                    } label: {
+                                        Label("Guardar foto (\(projectionMode.rawValue))", systemImage: "camera.viewfinder")
+                                    }
+                                }
+
+                                if projectionMode != .pano360 {
+                                    Section("Exportar video plano (\(projectionMode.rawValue))") {
+                                        ForEach(ReframeAspectPreset.allCases) { preset in
+                                            Button {
+                                                downloader.reframeAndExportVideo(
+                                                    item: item,
+                                                    projectionMode: projectionMode,
+                                                    yaw: controller.renderer.yaw,
+                                                    pitch: controller.renderer.pitch,
+                                                    fovDeg: controller.renderer.fovDeg,
+                                                    aspectPreset: preset
+                                                ) { _, msg in
+                                                    localSaveMessage = msg
+                                                    showLocalSaveAlert = true
+                                                }
+                                            } label: {
+                                                Label(preset.rawValue, systemImage: preset.systemImage)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Section("Exportar a Apple Fotos (360°)") {
                                     ForEach(StitchMode.allCases) { mode in
                                         Button {
                                             onDownloadRequested?(mode)

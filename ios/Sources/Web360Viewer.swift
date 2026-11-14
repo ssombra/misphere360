@@ -2,11 +2,27 @@ import SwiftUI
 import WebKit
 import CoreMotion
 
+/// Controlador ligero para solicitar capturas de la vista WebGL actual
+public final class Web360ViewerController {
+    weak var coordinator: Web360Viewer.Coordinator?
+
+    public init() {}
+
+    public func captureSnapshot(completion: @escaping (UIImage?) -> Void) {
+        guard let coord = coordinator else {
+            completion(nil)
+            return
+        }
+        coord.captureSnapshot(completion: completion)
+    }
+}
+
 /// Visor WebGL 360° idéntico al de la app web de Mac con control táctil ultra-suave y giroscopio opcional
 public struct Web360Viewer: UIViewRepresentable {
     let image: UIImage
     var enableMotion: Bool = false
     var projectionMode: PhotoProjectionMode = .normal
+    var controller: Web360ViewerController? = nil
 
     public func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -19,6 +35,7 @@ public struct Web360Viewer: UIViewRepresentable {
         webView.scrollView.bounces = false
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
+        controller?.coordinator = context.coordinator
 
         let html = generateViewerHTML()
         webView.loadHTMLString(html, baseURL: nil)
@@ -27,6 +44,7 @@ public struct Web360Viewer: UIViewRepresentable {
     }
 
     public func updateUIView(_ uiView: WKWebView, context: Context) {
+        controller?.coordinator = context.coordinator
         if context.coordinator.isReady {
             context.coordinator.sendImageToWebGL(image)
         } else {
@@ -85,6 +103,27 @@ public struct Web360Viewer: UIViewRepresentable {
             }
             let js = "window.setProjectionMode && window.setProjectionMode(\(modeIdx));"
             webView?.evaluateJavaScript(js, completionHandler: nil)
+        }
+
+        func captureSnapshot(completion: @escaping (UIImage?) -> Void) {
+            guard isReady, let webView = webView else {
+                completion(nil)
+                return
+            }
+            webView.evaluateJavaScript("window.captureSnapshot ? window.captureSnapshot() : null;") { result, _ in
+                guard let dataURL = result as? String,
+                      let commaIdx = dataURL.firstIndex(of: ",") else {
+                    completion(nil)
+                    return
+                }
+                let b64 = String(dataURL[dataURL.index(after: commaIdx)...])
+                guard let data = Data(base64Encoded: b64),
+                      let image = UIImage(data: data) else {
+                    completion(nil)
+                    return
+                }
+                completion(image)
+            }
         }
 
         func sendImageToWebGL(_ img: UIImage) {
@@ -420,6 +459,34 @@ public struct Web360Viewer: UIViewRepresentable {
             fovDeg = (mode === 1) ? 130.0 : (mode === 2 || mode === 3) ? 95.0 : 75.0;
           };
 
+          function drawFrame() {
+            if (!gl || !hasImage) return;
+            const canvas = document.getElementById("c");
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            const w = Math.floor(canvas.clientWidth * dpr);
+            const h = Math.floor(canvas.clientHeight * dpr);
+            if (canvas.width !== w || canvas.height !== h) {
+              canvas.width = w;
+              canvas.height = h;
+            }
+
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.useProgram(prog);
+            gl.uniform1f(gl.getUniformLocation(prog, "uYaw"), yaw);
+            gl.uniform1f(gl.getUniformLocation(prog, "uPitch"), pitch);
+            gl.uniform1f(gl.getUniformLocation(prog, "uTanHalfFov"), Math.tan((fovDeg * Math.PI) / 360.0));
+            gl.uniform1f(gl.getUniformLocation(prog, "uFovDeg"), fovDeg);
+            gl.uniform1f(gl.getUniformLocation(prog, "uAspect"), canvas.width / Math.max(1, canvas.height));
+            gl.uniform1i(gl.getUniformLocation(prog, "uProjMode"), projMode);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+          }
+
+          window.captureSnapshot = function() {
+            if (!gl || !hasImage) return null;
+            drawFrame();
+            return document.getElementById("c").toDataURL("image/jpeg", 0.95);
+          };
+
           function render() {
             if (gl && hasImage) {
               if (isGyroEnabled && !dragging) {
@@ -431,25 +498,7 @@ public struct Web360Viewer: UIViewRepresentable {
                 let targetP = Math.max(-1.50, Math.min(1.50, gyroPitch + gyroOffsetPitch));
                 pitch += (targetP - pitch) * 0.22;
               }
-
-              const canvas = document.getElementById("c");
-              const dpr = Math.min(window.devicePixelRatio || 1, 2);
-              const w = Math.floor(canvas.clientWidth * dpr);
-              const h = Math.floor(canvas.clientHeight * dpr);
-              if (canvas.width !== w || canvas.height !== h) {
-                canvas.width = w;
-                canvas.height = h;
-              }
-
-              gl.viewport(0, 0, canvas.width, canvas.height);
-              gl.useProgram(prog);
-              gl.uniform1f(gl.getUniformLocation(prog, "uYaw"), yaw);
-              gl.uniform1f(gl.getUniformLocation(prog, "uPitch"), pitch);
-              gl.uniform1f(gl.getUniformLocation(prog, "uTanHalfFov"), Math.tan((fovDeg * Math.PI) / 360.0));
-              gl.uniform1f(gl.getUniformLocation(prog, "uFovDeg"), fovDeg);
-              gl.uniform1f(gl.getUniformLocation(prog, "uAspect"), canvas.width / Math.max(1, canvas.height));
-              gl.uniform1i(gl.getUniformLocation(prog, "uProjMode"), projMode);
-              gl.drawArrays(gl.TRIANGLES, 0, 6);
+              drawFrame();
             }
             requestAnimationFrame(render);
           }

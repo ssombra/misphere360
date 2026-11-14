@@ -5,13 +5,49 @@ import CoreLocation
 import Metal
 import UIKit
 
-/// Exportador de video 360° por GPU (Metal + VideoToolbox) con inyección de metadatos espaciales (sv3d + GSpherical).
+/// Formatos de relación de aspecto para exportar video plano reencuadrado ("Reframe").
+public enum ReframeAspectPreset: String, CaseIterable, Identifiable {
+    case vertical9x16 = "Vertical (9:16)"
+    case square1x1 = "Cuadrado (1:1)"
+    case horizontal16x9 = "Horizontal (16:9)"
+
+    public var id: String { rawValue }
+
+    public var systemImage: String {
+        switch self {
+        case .vertical9x16: return "rectangle.portrait"
+        case .square1x1: return "square"
+        case .horizontal16x9: return "rectangle"
+        }
+    }
+
+    public var dimensions: (width: Int, height: Int, bitrate: Int) {
+        switch self {
+        case .vertical9x16: return (1080, 1920, 16_000_000)
+        case .square1x1: return (1920, 1920, 20_000_000)
+        case .horizontal16x9: return (1920, 1080, 16_000_000)
+        }
+    }
+}
+
+/// Exportador de video 360° y video plano (Reframe) por GPU (Metal + VideoToolbox) con inyección de metadatos espaciales (sv3d + GSpherical).
 public final class VideoStitcher {
     public static let shared = VideoStitcher()
+
+    private struct StitchUniforms {
+        var mode: Int32
+        var yaw: Float
+        var pitch: Float
+        var tanHalfFov: Float
+        var aspect: Float
+        var projMode: Int32
+        var fovDeg: Float
+    }
 
     private let device: MTLDevice?
     private let commandQueue: MTLCommandQueue?
     private var pipelineState: MTLRenderPipelineState?
+    private var reframePipelineState: MTLRenderPipelineState?
     private var samplerState: MTLSamplerState?
     private var textureCache: CVMetalTextureCache?
 
@@ -36,7 +72,8 @@ public final class VideoStitcher {
 
         guard let lib = dev.makeDefaultLibrary() ?? (try? dev.makeDefaultLibrary(bundle: Bundle.main)),
               let vFunc = lib.makeFunction(name: "stitchVertexShader"),
-              let fFunc = lib.makeFunction(name: "stitchOffscreenEquirectFragment") else {
+              let fFunc = lib.makeFunction(name: "stitchOffscreenEquirectFragment"),
+              let fReframeFunc = lib.makeFunction(name: "stitchFragmentShader") else {
             print("[VideoStitcher] No se pudieron cargar los shaders Metal.")
             return false
         }
@@ -46,8 +83,14 @@ public final class VideoStitcher {
         desc.fragmentFunction = fFunc
         desc.colorAttachments[0].pixelFormat = .bgra8Unorm
 
+        let reframeDesc = MTLRenderPipelineDescriptor()
+        reframeDesc.vertexFunction = vFunc
+        reframeDesc.fragmentFunction = fReframeFunc
+        reframeDesc.colorAttachments[0].pixelFormat = .bgra8Unorm
+
         do {
             self.pipelineState = try dev.makeRenderPipelineState(descriptor: desc)
+            self.reframePipelineState = try dev.makeRenderPipelineState(descriptor: reframeDesc)
         } catch {
             print("[VideoStitcher] Error creando RenderPipelineState: \(error)")
             return false
@@ -143,10 +186,83 @@ public final class VideoStitcher {
         progress: ((Double) -> Void)? = nil,
         completion: @escaping (Result<URL, Error>) -> Void
     ) {
+        runMetalVideoExport(
+            inputURL: inputURL,
+            outputURL: outputURL,
+            fixedSpec: nil,
+            uniforms: nil,
+            inject360Metadata: true,
+            location: location,
+            progress: progress,
+            completion: completion
+        )
+    }
+
+    /// Exporta un MP4 plano ("Reframe") en el modo de proyección y encuadre elegidos (Normal, Fisheye, Little Planet, Rabbit Hole, Crystal Ball).
+    public func stitchReframedVideo(
+        inputURL: URL,
+        outputURL: URL,
+        projectionMode: PhotoProjectionMode,
+        yaw: Float,
+        pitch: Float,
+        fovDeg: Float,
+        aspectPreset: ReframeAspectPreset,
+        location: CLLocation? = nil,
+        progress: ((Double) -> Void)? = nil,
+        completion: @escaping (Result<URL, Error>) -> Void
+    ) {
+        let dims = aspectPreset.dimensions
+        let aspect = Float(dims.width) / Float(dims.height)
+        let fovRad = fovDeg * (.pi / 180.0)
+        let tanHalfFov = tan(fovRad * 0.5)
+
+        let projIndex: Int32
+        let shaderMode: Int32
+        switch projectionMode {
+        case .normal: projIndex = 0; shaderMode = 0
+        case .fisheye: projIndex = 1; shaderMode = 0
+        case .littlePlanet: projIndex = 2; shaderMode = 0
+        case .rabbitHole: projIndex = 3; shaderMode = 0
+        case .crystalBall: projIndex = 4; shaderMode = 0
+        case .pano360: projIndex = 0; shaderMode = 1
+        }
+
+        let uniforms = StitchUniforms(
+            mode: shaderMode,
+            yaw: yaw,
+            pitch: pitch,
+            tanHalfFov: tanHalfFov,
+            aspect: aspect,
+            projMode: projIndex,
+            fovDeg: fovDeg
+        )
+
+        runMetalVideoExport(
+            inputURL: inputURL,
+            outputURL: outputURL,
+            fixedSpec: dims,
+            uniforms: uniforms,
+            inject360Metadata: false,
+            location: location,
+            progress: progress,
+            completion: completion
+        )
+    }
+
+    private func runMetalVideoExport(
+        inputURL: URL,
+        outputURL: URL,
+        fixedSpec: (width: Int, height: Int, bitrate: Int)?,
+        uniforms: StitchUniforms?,
+        inject360Metadata: Bool,
+        location: CLLocation?,
+        progress: ((Double) -> Void)?,
+        completion: @escaping (Result<URL, Error>) -> Void
+    ) {
         DispatchQueue.global(qos: .userInitiated).async {
             guard self.ensureMetalReady(),
                   let commandQueue = self.commandQueue,
-                  let pipeline = self.pipelineState,
+                  let pipeline = (uniforms != nil ? self.reframePipelineState : self.pipelineState),
                   let sampler = self.samplerState,
                   let texCache = self.textureCache,
                   let lut1 = self.lut1Texture,
@@ -164,7 +280,7 @@ public final class VideoStitcher {
 
             let audioTrack = asset.tracks(withMediaType: .audio).first
             let durationSec = max(0.01, asset.duration.seconds.isFinite ? asset.duration.seconds : 1.0)
-            let spec = self.outputSpec(for: videoTrack.naturalSize)
+            let spec = fixedSpec ?? self.outputSpec(for: videoTrack.naturalSize)
 
             let rawOutputURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("MiSphere_raw_\(UUID().uuidString).mp4")
@@ -285,6 +401,7 @@ public final class VideoStitcher {
                             dstPixelBuffer: dstBuffer,
                             width: spec.width,
                             height: spec.height,
+                            uniforms: uniforms,
                             texCache: texCache,
                             commandQueue: commandQueue,
                             pipeline: pipeline,
@@ -340,6 +457,15 @@ public final class VideoStitcher {
                     return
                 }
 
+                if !inject360Metadata {
+                    try? FileManager.default.moveItem(at: rawOutputURL, to: outputURL)
+                    DispatchQueue.main.async {
+                        progress?(1.0)
+                    }
+                    completion(.success(outputURL))
+                    return
+                }
+
                 // Inyectar metadatos espaciales 360° (st3d + sv3d + GSpherical)
                 do {
                     try MP4SpatialMetadataInjector.inject360Metadata(from: rawOutputURL, to: outputURL)
@@ -365,6 +491,7 @@ public final class VideoStitcher {
         dstPixelBuffer: CVPixelBuffer,
         width: Int,
         height: Int,
+        uniforms: StitchUniforms?,
         texCache: CVMetalTextureCache,
         commandQueue: MTLCommandQueue,
         pipeline: MTLRenderPipelineState,
@@ -403,6 +530,10 @@ public final class VideoStitcher {
         }
 
         enc.setRenderPipelineState(pipeline)
+        if var u = uniforms {
+            enc.setVertexBytes(&u, length: MemoryLayout<StitchUniforms>.size, index: 0)
+            enc.setFragmentBytes(&u, length: MemoryLayout<StitchUniforms>.size, index: 0)
+        }
         enc.setFragmentTexture(yTex, index: 0)
         enc.setFragmentTexture(uvTex, index: 1)
         enc.setFragmentTexture(lut1, index: 2)

@@ -339,30 +339,7 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
 
         encoder.setRenderPipelineState(pipeline)
 
-        // Calcular Uniforms
-        let aspect = Float(view.bounds.width / max(1.0, view.bounds.height))
-        let fovRad = fovDeg * (.pi / 180.0)
-        let tanHalfFov = tan(fovRad * 0.5)
-
-        let projIndex: Int32
-        switch projectionMode {
-        case .normal: projIndex = 0
-        case .fisheye: projIndex = 1
-        case .littlePlanet: projIndex = 2
-        case .rabbitHole: projIndex = 3
-        case .crystalBall: projIndex = 4
-        case .pano360: projIndex = 0
-        }
-
-        var uniforms = Uniforms(
-            mode: Int32(mode.rawValue),
-            yaw: yaw,
-            pitch: pitch,
-            tanHalfFov: tanHalfFov,
-            aspect: aspect,
-            projMode: projIndex,
-            fovDeg: fovDeg
-        )
+        var uniforms = makeUniforms(aspect: Float(view.bounds.width / max(1.0, view.bounds.height)))
 
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
@@ -381,5 +358,123 @@ public final class Metal360Renderer: NSObject, ObservableObject, MTKViewDelegate
 
         commandBuffer.present(drawable)
         commandBuffer.commit()
+    }
+
+    private func makeUniforms(aspect: Float) -> Uniforms {
+        let fovRad = fovDeg * (.pi / 180.0)
+        let tanHalfFov = tan(fovRad * 0.5)
+
+        let projIndex: Int32
+        switch projectionMode {
+        case .normal: projIndex = 0
+        case .fisheye: projIndex = 1
+        case .littlePlanet: projIndex = 2
+        case .rabbitHole: projIndex = 3
+        case .crystalBall: projIndex = 4
+        case .pano360: projIndex = 0
+        }
+
+        return Uniforms(
+            mode: Int32(mode.rawValue),
+            yaw: yaw,
+            pitch: pitch,
+            tanHalfFov: tanHalfFov,
+            aspect: aspect,
+            projMode: projIndex,
+            fovDeg: fovDeg
+        )
+    }
+
+    /// Captura el frame actual del video renderizado en el modo, ángulo y zoom actuales.
+    public func captureCurrentFrameSnapshot() -> UIImage? {
+        guard let dev = device,
+              let pipeline = pipelineState,
+              let commandQueue = commandQueue,
+              let sampler = samplerState,
+              let lut1 = lut1Texture,
+              let lut2 = lut2Texture,
+              let weight = weightTexture else {
+            return nil
+        }
+
+        textureLock.lock()
+        let yTex = self.currentYTexture
+        let uvTex = self.currentUVTexture
+        textureLock.unlock()
+
+        guard let y = yTex, let uv = uvTex else { return nil }
+
+        let drawableW = Int(mtkView?.drawableSize.width ?? 1080)
+        let drawableH = Int(mtkView?.drawableSize.height ?? 1920)
+        let width = max(64, drawableW)
+        let height = max(64, drawableH)
+
+        let texDesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        texDesc.usage = [.renderTarget, .shaderRead]
+        texDesc.storageMode = .shared
+
+        guard let outTex = dev.makeTexture(descriptor: texDesc) else { return nil }
+
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = outTex
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        rpd.colorAttachments[0].storeAction = .store
+
+        guard let cmdBuf = commandQueue.makeCommandBuffer(),
+              let enc = cmdBuf.makeRenderCommandEncoder(descriptor: rpd) else {
+            return nil
+        }
+
+        enc.setRenderPipelineState(pipeline)
+        var uniforms = makeUniforms(aspect: Float(width) / Float(max(1, height)))
+        enc.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
+        enc.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 0)
+        enc.setFragmentTexture(y, index: 0)
+        enc.setFragmentTexture(uv, index: 1)
+        enc.setFragmentTexture(lut1, index: 2)
+        enc.setFragmentTexture(lut2, index: 3)
+        enc.setFragmentTexture(weight, index: 4)
+        enc.setFragmentSamplerState(sampler, index: 0)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+        enc.endEncoding()
+
+        cmdBuf.commit()
+        cmdBuf.waitUntilCompleted()
+
+        let bytesPerRow = width * 4
+        var rawBytes = [UInt8](repeating: 0, count: bytesPerRow * height)
+        outTex.getBytes(
+            &rawBytes,
+            bytesPerRow: bytesPerRow,
+            from: MTLRegionMake2D(0, 0, width, height),
+            mipmapLevel: 0
+        )
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        guard let provider = CGDataProvider(data: Data(rawBytes) as CFData),
+              let cgImg = CGImage(
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGBitmapInfo(rawValue: bitmapInfo),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: true,
+                intent: .defaultIntent
+              ) else {
+            return nil
+        }
+
+        return UIImage(cgImage: cgImg)
     }
 }

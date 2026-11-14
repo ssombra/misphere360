@@ -20,7 +20,10 @@ public struct PhotoPreviewView: View {
     @State private var showInfoSheet = false
     @State private var downloadedFileSize: Int64? = nil
     @State private var errorMessage: String? = nil
+    @State private var snapshotMessage: String? = nil
+    @State private var showSnapshotAlert = false
 
+    private let webController = Web360ViewerController()
     private let brandOrange = Color(red: 1.0, green: 0.404, blue: 0.0)
 
     public init(
@@ -74,8 +77,13 @@ public struct PhotoPreviewView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    Web360Viewer(image: img, enableMotion: enableGyro, projectionMode: projectionMode)
-                        .ignoresSafeArea()
+                    Web360Viewer(
+                        image: img,
+                        enableMotion: enableGyro,
+                        projectionMode: projectionMode,
+                        controller: webController
+                    )
+                    .ignoresSafeArea()
                 }
             } else if let err = errorMessage {
                 VStack(spacing: 16) {
@@ -191,6 +199,16 @@ public struct PhotoPreviewView: View {
 
                         // 3. Descarga / Guardar en Fotos
                         Menu {
+                            if let currentImg = stitchedImage {
+                                Section("Captura de esta vista") {
+                                    Button {
+                                        captureCurrentViewSnapshot(img: currentImg)
+                                    } label: {
+                                        Label("Guardar captura (\(projectionMode.rawValue))", systemImage: "camera.viewfinder")
+                                    }
+                                }
+                            }
+
                             Section("Exportar a Apple Fotos") {
                                 ForEach(StitchMode.allCases) { mode in
                                     Button {
@@ -272,6 +290,33 @@ public struct PhotoPreviewView: View {
         }
         .sheet(isPresented: $showInfoSheet) {
             PhotoInfoSheetView(item: item, fileSizeFormatted: formattedFileSize)
+        }
+        .alert("Captura de vista", isPresented: $showSnapshotAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(snapshotMessage ?? "")
+        }
+    }
+
+    private func captureCurrentViewSnapshot(img: UIImage) {
+        if projectionMode == .pano360 {
+            MediaDownloader.shared.saveSnapshotImage(img, for: item, label: projectionMode.rawValue) { _, msg in
+                snapshotMessage = msg
+                showSnapshotAlert = true
+            }
+            return
+        }
+
+        webController.captureSnapshot { snapshot in
+            guard let snapshot = snapshot else {
+                snapshotMessage = "No se pudo capturar la vista actual."
+                showSnapshotAlert = true
+                return
+            }
+            MediaDownloader.shared.saveSnapshotImage(snapshot, for: item, label: projectionMode.rawValue) { _, msg in
+                snapshotMessage = msg
+                showSnapshotAlert = true
+            }
         }
     }
 
