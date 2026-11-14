@@ -274,6 +274,43 @@ public class CameraManager: ObservableObject {
         }
     }
 
+    private func registerClientInfo(token: Int) {
+        let localIP = getLocalWiFiIP()
+        let packet: [String: Any] = [
+            "msg_id": 261,
+            "param": localIP,
+            "token": token,
+            "type": "TCP"
+        ]
+        sendCustomPacket(packet, msgId: 261)
+    }
+
+    private func getLocalWiFiIP() -> String {
+        var address = "192.168.42.2"
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return address }
+        defer { freeifaddrs(ifaddr) }
+
+        for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+            let interface = ptr.pointee
+            let addrFamily = interface.ifa_addr.pointee.sa_family
+            if addrFamily == UInt8(AF_INET) {
+                let name = String(cString: interface.ifa_name)
+                var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
+                            &hostname, socklen_t(hostname.count), nil, socklen_t(0), NI_NUMERICHOST)
+                let ip = String(cString: hostname)
+                if ip.hasPrefix("192.168.42.") {
+                    return ip
+                }
+                if name == "en0" && !ip.isEmpty {
+                    address = ip
+                }
+            }
+        }
+        return address
+    }
+
     // MARK: - Envío y Recepción TCP (Garantizando param como String y pausa mínima)
 
     public func sendCommand(msgId: Int, param: Any? = nil, onResponse: (([String: Any]) -> Void)? = nil) {
@@ -413,6 +450,7 @@ public class CameraManager: ObservableObject {
                     self.isConnected = true
                     self.isConnecting = false
                     self.lastStatusMessage = "Cámara Conectada"
+                    self.registerClientInfo(token: tok)
                     self.syncCameraDate()
                     self.syncSettingsToCamera()
                     self.fetchInitialState()
@@ -565,6 +603,16 @@ public class CameraManager: ObservableObject {
                 }
                 self.fetchBatteryStatus()
                 self.fetchStorageStatus()
+
+            case 1793: // AMBA_MSGID_QUERY_SESSION_HOLDER ("¿sigues usando la sesión?")
+                if self.sessionToken > 0 {
+                    let reply: [String: Any] = [
+                        "msg_id": 1793,
+                        "token": self.sessionToken,
+                        "param": self.sessionToken
+                    ]
+                    self.sendCustomPacket(reply, msgId: 1793)
+                }
 
             default:
                 break
