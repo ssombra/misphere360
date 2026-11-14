@@ -521,7 +521,10 @@ public class CameraManager: ObservableObject {
                 }
 
             case 4365: // GET_CAMERA
-                if let rec = obj["rec_time"] as? Int { self.isRecording = rec > 0 }
+                if let camStatus = obj["status"] as? Int {
+                    // 0=Idle; 3=Normal, 4=Short, 5=Timelapse, 13=SlowMo
+                    self.isRecording = [3, 4, 5, 13].contains(camStatus)
+                }
                 let sm = obj["sub_mode"] as? Int ?? -1
                 let tim = obj["timing"] as? Int ?? -1
                 let capInt = obj["cap_interval"] as? Int ?? -1
@@ -586,7 +589,7 @@ public class CameraManager: ObservableObject {
                 }
 
             case 513, 4620, 4623, 5028: // INICIO VIDEO (513: Normal, 4620: Corto, 4623: Timelapse, 5028: SlowMo)
-                if rval == 0 {
+                if rval == 0 || rval == 128 {
                     self.isRecording = true
                     self.lastStatusMessage = "Grabando video (\(msgId))..."
                 } else {
@@ -595,9 +598,11 @@ public class CameraManager: ObservableObject {
                 }
 
             case 514: // FIN VIDEO
-                if rval == 0 {
+                if rval == 0 || rval == 128 {
                     self.isRecording = false
                     self.lastStatusMessage = "Video guardado."
+                } else {
+                    self.lastStatusMessage = "❌ Error al detener video (514, rval:\(rval))"
                 }
 
             case 6165: // GYRO_CALIB
