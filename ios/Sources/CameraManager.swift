@@ -110,6 +110,7 @@ public class CameraManager: ObservableObject {
     // Callbacks pendientes para comandos TCP asíncronos (cola FIFO por msgId)
     private var pendingCallbacks: [Int: [([String: Any]) -> Void]] = [:]
     private var lastSendTime: TimeInterval = 0.0
+    private var hasSyncedSettingsOnConnect = false
 
     private var connection: NWConnection?
     private let queue = DispatchQueue(label: "com.ssombra.misphere360.tcp", qos: .userInitiated)
@@ -453,7 +454,7 @@ public class CameraManager: ObservableObject {
                     self.lastStatusMessage = "Cámara Conectada"
                     self.registerClientInfo(token: tok)
                     self.syncCameraDate()
-                    self.syncSettingsToCamera()
+                    self.hasSyncedSettingsOnConnect = false
                     self.fetchInitialState()
                 } else {
                     self.lastStatusMessage = "Reconectando con la cámara..."
@@ -521,10 +522,17 @@ public class CameraManager: ObservableObject {
                     if let ledVal = obj["led"] as? Int { self.ledEnabled = (ledVal != 0) }
                 }
 
+            case 4362: // GET_CAMERA_STATE
+                if let camStatus = (obj["param"] as? Int) ?? Int(obj["param"] as? String ?? "") ?? (obj["status"] as? Int) {
+                    self.applyCameraState(camStatus)
+                } else if !self.hasSyncedSettingsOnConnect {
+                    self.hasSyncedSettingsOnConnect = true
+                    self.syncSettingsToCamera()
+                }
+
             case 4365: // GET_CAMERA
                 if let camStatus = obj["status"] as? Int {
-                    // 0=Idle; 3=Normal, 4=Short, 5=Timelapse, 13=SlowMo
-                    self.isRecording = [3, 4, 5, 13].contains(camStatus)
+                    self.applyCameraState(camStatus)
                 }
                 let sm = obj["sub_mode"] as? Int ?? -1
                 let tim = obj["timing"] as? Int ?? -1
@@ -656,11 +664,42 @@ public class CameraManager: ObservableObject {
     }
 
     public func fetchInitialState() {
+        sendCommand(msgId: 4362, param: nil) // Camera state (0=Idle, 3/4/5/13=Video, 12=Interval)
         sendCommand(msgId: 4364, param: nil) // Device status
         sendCommand(msgId: 4365, param: nil) // Camera status
         sendCommand(msgId: 4361, param: nil) // Battery
         sendCommand(msgId: 4358, param: nil) // Storage
         sendCommand(msgId: 1539, param: nil) // Wi-Fi info
+    }
+
+    private func applyCameraState(_ camStatus: Int) {
+        if [3, 4, 5, 13].contains(camStatus) {
+            self.isRecording = true
+            self.isIntervalRunning = false
+            self.currentMode = 0
+            switch camStatus {
+            case 4: self.videoSubMode = 1
+            case 5: self.videoSubMode = 2
+            case 13: self.videoSubMode = 4
+            default: self.videoSubMode = 0
+            }
+            self.hasSyncedSettingsOnConnect = true
+            self.lastStatusMessage = "Grabación en curso detectada (estado \(camStatus))"
+        } else if camStatus == 12 {
+            self.isIntervalRunning = true
+            self.isRecording = false
+            self.currentMode = 1
+            self.photoSubMode = 2
+            self.hasSyncedSettingsOnConnect = true
+            self.lastStatusMessage = "Intervalómetro en curso detectado (estado 12)"
+        } else if camStatus == 0 {
+            self.isRecording = false
+            self.isIntervalRunning = false
+            if !self.hasSyncedSettingsOnConnect {
+                self.hasSyncedSettingsOnConnect = true
+                self.syncSettingsToCamera()
+            }
+        }
     }
 
     public func fetchBatteryStatus() {
