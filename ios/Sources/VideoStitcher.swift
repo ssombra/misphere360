@@ -250,14 +250,11 @@ public final class VideoStitcher {
             let videoQueue = DispatchQueue(label: "com.misphere.videostitcher.video")
             let audioQueue = DispatchQueue(label: "com.misphere.videostitcher.audio")
 
-            var stitchFailedError: Error? = nil
-
             group.enter()
             videoInput.requestMediaDataWhenReady(on: videoQueue) {
                 while videoInput.isReadyForMoreMediaData {
                     autoreleasepool {
-                        guard stitchFailedError == nil,
-                              let sample = videoOutput.copyNextSampleBuffer() else {
+                        guard let sample = videoOutput.copyNextSampleBuffer() else {
                             videoInput.markAsFinished()
                             group.leave()
                             return

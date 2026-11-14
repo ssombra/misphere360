@@ -493,7 +493,7 @@ public class MediaDownloader: ObservableObject {
                 inputURL: destinationURL,
                 outputURL: stitchedURL,
                 progress: { [weak self] p in
-                    self?.downloadProgress = p
+                    self?.downloadProgress = Float(p)
                     self?.statusMessage = "Cosiendo video 360°... \(Int(p * 100))%"
                 },
                 completion: { [weak self] result in
