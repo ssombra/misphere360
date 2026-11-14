@@ -281,7 +281,11 @@ public struct SDThumbnailView: View {
             }
         }
         .onAppear {
-            if let cached = ThumbnailCache.shared.getThumbnail(for: item) {
+            if let localThumbURL = LocalLibraryManager.shared.thumbnailURL(forId: item.id),
+               let localImg = UIImage(contentsOfFile: localThumbURL.path) {
+                self.thumbnail = localImg
+                self.isLoading = false
+            } else if let cached = ThumbnailCache.shared.getThumbnail(for: item) {
                 self.thumbnail = cached
                 self.isLoading = false
             } else {

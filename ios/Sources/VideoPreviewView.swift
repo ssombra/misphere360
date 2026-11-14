@@ -33,7 +33,15 @@ final class VideoPreviewController: ObservableObject {
         currentTime = 0.0
         duration = 0.0
 
-        MediaDownloader.shared.resolveMediaURL(item: item) { [weak self] url, contentLength in
+        // 1. Si ya está en la biblioteca Local, reproducir desde disco sin usar Wi-Fi
+        if let localAsset = LocalLibraryManager.shared.asset(for: item) {
+            self.fileSizeBytes = localAsset.fileSizeBytes
+            self.startPlayer(with: LocalLibraryManager.shared.originalURL(for: localAsset))
+            return
+        }
+
+        // 2. Streaming desde la cámara priorizando el proxy AB.MP4 si existe
+        MediaDownloader.shared.resolveMediaURL(item: item, preferPreviewProxy: true) { [weak self] url, contentLength in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 guard let url = url else {

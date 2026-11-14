@@ -213,6 +213,31 @@ public struct PhotoPreviewView: View {
 
     private func loadAndStitchPreview() {
         isLoading = true
+
+        // 1. Si ya está en la biblioteca Local, abrir instantáneamente sin usar Wi-Fi
+        if let localAsset = LocalLibraryManager.shared.asset(for: item) {
+            self.downloadedFileSize = localAsset.fileSizeBytes
+            if let stitchedURL = LocalLibraryManager.shared.stitchedURL(for: localAsset) {
+                loadingMessage = "Abriendo desde Local..."
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let cachedImg = UIImage(contentsOfFile: stitchedURL.path)
+                    DispatchQueue.main.async {
+                        if let img = cachedImg {
+                            self.stitchedImage = img
+                            self.isLoading = false
+                        } else {
+                            self.stitchFromLocalOriginal(localAsset)
+                        }
+                    }
+                }
+                return
+            } else {
+                stitchFromLocalOriginal(localAsset)
+                return
+            }
+        }
+
+        // 2. No está en Local: descargar de la cámara, coser y guardar automáticamente en Local
         loadingMessage = "Descargando para vista previa 360°..."
 
         MediaDownloader.shared.downloadToTemporaryFile(item: item) { localURL in
@@ -237,7 +262,15 @@ public struct PhotoPreviewView: View {
 
             DispatchQueue.global(qos: .userInitiated).async {
                 let previewImg = PhotoStitcher.shared.stitchForInteractivePreview(from: localURL, maxPixelSize: 3840)
-                try? FileManager.default.removeItem(at: localURL)
+
+                if let img = previewImg {
+                    // Persistir en Local (original + cosida) antes de borrar el archivo temporal
+                    LocalLibraryManager.shared.saveMedia(item: item, originalTempURL: localURL, stitchedImage: img) { _ in
+                        try? FileManager.default.removeItem(at: localURL)
+                    }
+                } else {
+                    try? FileManager.default.removeItem(at: localURL)
+                }
 
                 DispatchQueue.main.async {
                     if let img = previewImg {
@@ -247,6 +280,26 @@ public struct PhotoPreviewView: View {
                         self.isLoading = false
                         self.errorMessage = "No se pudo generar la vista 360°."
                     }
+                }
+            }
+        }
+    }
+
+    private func stitchFromLocalOriginal(_ localAsset: LocalMediaAsset) {
+        let origURL = LocalLibraryManager.shared.originalURL(for: localAsset)
+        loadingMessage = "Cosiendo esfera 360°..."
+        DispatchQueue.global(qos: .userInitiated).async {
+            let previewImg = PhotoStitcher.shared.stitchForInteractivePreview(from: origURL, maxPixelSize: 3840)
+            if let img = previewImg {
+                LocalLibraryManager.shared.saveStitchedImage(img, forId: item.id)
+            }
+            DispatchQueue.main.async {
+                if let img = previewImg {
+                    self.stitchedImage = img
+                    self.isLoading = false
+                } else {
+                    self.isLoading = false
+                    self.errorMessage = "No se pudo generar la vista 360°."
                 }
             }
         }

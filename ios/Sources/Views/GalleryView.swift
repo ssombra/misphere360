@@ -18,11 +18,18 @@ public enum GalleryFilterType: Equatable {
     }
 }
 
+public enum GallerySourceTab: String, CaseIterable {
+    case camera = "Cámara"
+    case local = "Local"
+}
+
 struct GalleryView: View {
     @Environment(\.dismiss) var dismiss
     @ObservedObject var camera = CameraManager.shared
     @ObservedObject var downloader = MediaDownloader.shared
+    @ObservedObject var localLibrary = LocalLibraryManager.shared
 
+    @State private var activeTab: GallerySourceTab = .camera
     @State private var allFiles: [SDFileItem] = []
     @State private var rawFolders: [String] = []
     @State private var isLoading = false
@@ -54,20 +61,77 @@ struct GalleryView: View {
         return false
     }
 
+    private var displayedFiles: [SDFileItem] {
+        if activeTab == .camera {
+            return allFiles
+        }
+        let localItems = localLibrary.assets.map { localLibrary.toSDFileItem($0) }
+        return localItems.filter { item in
+            guard let date = parseDate(from: item.filename) else {
+                return activeFilter == .all
+            }
+            let cal = Calendar.current
+            let now = Date()
+            switch activeFilter {
+            case .last7Days:
+                guard let cutoff = cal.date(byAdding: .day, value: -7, to: now) else { return true }
+                return date >= cutoff
+            case .last30Days:
+                guard let cutoff = cal.date(byAdding: .day, value: -30, to: now) else { return true }
+                return date >= cutoff
+            case .all:
+                return true
+            case .custom(let start, let end):
+                let s = cal.startOfDay(for: start)
+                let e = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: end)) ?? end
+                return date >= s && date < e
+            }
+        }
+    }
+
     var body: some View {
         NavigationView {
             ZStack {
                 darkBg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
+                    // Selector Cámara (microSD) | Local (iPhone)
+                    Picker("Origen", selection: $activeTab) {
+                        Text("Cámara (microSD)").tag(GallerySourceTab.camera)
+                        Text("Local (\(localLibrary.assets.count))").tag(GallerySourceTab.local)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .onChange(of: activeTab) { _ in
+                        isSelectionMode = false
+                        selectedItemIDs.removeAll()
+                    }
+
                     // Barra de Filtros de Fecha (7 Días, 30 Días, Todo, Filtrar) + Modo de Descarga
                     filterAndModeBar
                         .padding(.horizontal, 16)
-                        .padding(.top, 10)
+                        .padding(.top, 8)
                         .padding(.bottom, 8)
 
+                    if activeTab == .local && !localLibrary.assets.isEmpty {
+                        HStack {
+                            Label("Espacio usado: \(localLibrary.formattedTotalStorage)", systemImage: "internaldrive")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                            Spacer()
+                            Button("Vaciar Local") {
+                                localLibrary.clearAll()
+                            }
+                            .font(.caption.bold())
+                            .foregroundColor(.red.opacity(0.9))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 6)
+                    }
+
                     // Cuadrícula de Archivos
-                    if isLoading && allFiles.isEmpty {
+                    if activeTab == .camera && isLoading && allFiles.isEmpty {
                         Spacer()
                         VStack(spacing: 14) {
                             ProgressView()
@@ -78,7 +142,7 @@ struct GalleryView: View {
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                    } else if allFiles.isEmpty {
+                    } else if displayedFiles.isEmpty {
                         Spacer()
                         emptyStateView
                         Spacer()
@@ -109,7 +173,7 @@ struct GalleryView: View {
                     .cornerRadius(18)
                 }
             }
-            .navigationTitle(isSelectionMode ? "\(selectedItemIDs.count) seleccionados" : "Álbum Cámara")
+            .navigationTitle(isSelectionMode ? "\(selectedItemIDs.count) seleccionados" : (activeTab == .camera ? "Álbum Cámara" : "Biblioteca Local"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -138,8 +202,8 @@ struct GalleryView: View {
                                 .background(Color.white.opacity(0.12))
                                 .clipShape(Circle())
                         }
-                        .disabled(allFiles.isEmpty)
-                        .opacity(allFiles.isEmpty ? 0.35 : 1.0)
+                        .disabled(displayedFiles.isEmpty)
+                        .opacity(displayedFiles.isEmpty ? 0.35 : 1.0)
                     }
                 }
 
@@ -376,6 +440,15 @@ struct GalleryView: View {
 
                 VStack {
                     HStack {
+                        if let localAsset = localLibrary.asset(for: item) {
+                            Image(systemName: localAsset.exportedToPhotos ? "checkmark.seal.fill" : "iphone")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(localAsset.exportedToPhotos ? .green : .cyan)
+                                .padding(6)
+                                .background(Color.black.opacity(0.60))
+                                .clipShape(Circle())
+                                .padding(6)
+                        }
                         Spacer()
                         if isSelectionMode {
                             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -384,14 +457,35 @@ struct GalleryView: View {
                                 .padding(6)
                         } else {
                             Menu {
-                                ForEach(StitchMode.allCases) { mode in
+                                if activeTab == .camera && !localLibrary.isDownloaded(item) {
                                     Button {
-                                        downloader.saveMediaToCameraRoll(item: item, mode: mode) { ok, msg in
+                                        downloader.downloadToLocalLibrary(item: item) { _, msg in
                                             alertMessage = msg
                                             showAlert = true
                                         }
                                     } label: {
-                                        Label(mode.title, systemImage: mode.systemImage)
+                                        Label("Guardar en Local", systemImage: "iphone.and.arrow.forward")
+                                    }
+                                    Divider()
+                                }
+                                Section("Exportar a Apple Fotos") {
+                                    ForEach(StitchMode.allCases) { mode in
+                                        Button {
+                                            downloader.saveMediaToCameraRoll(item: item, mode: mode) { _, msg in
+                                                alertMessage = msg
+                                                showAlert = true
+                                            }
+                                        } label: {
+                                            Label(mode.title, systemImage: mode.systemImage)
+                                        }
+                                    }
+                                }
+                                if activeTab == .local {
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        localLibrary.deleteAsset(id: item.id)
+                                    } label: {
+                                        Label("Eliminar de Local", systemImage: "trash")
                                     }
                                 }
                             } label: {
@@ -426,11 +520,14 @@ struct GalleryView: View {
                 .foregroundColor(.secondary.opacity(0.6))
 
             let msg: String = {
+                if activeTab == .local && localLibrary.assets.isEmpty {
+                    return "Aún no tienes archivos en Local. Abre una foto desde Cámara o usa Guardar en Local."
+                }
                 switch activeFilter {
-                case .last7Days: return "No hay fotos en los últimos 7 días."
-                case .last30Days: return "No hay fotos en los últimos 30 días."
-                case .all: return "No se encontraron fotos en la microSD."
-                case .custom: return "No hay fotos en el rango seleccionado."
+                case .last7Days: return "No hay archivos en los últimos 7 días."
+                case .last30Days: return "No hay archivos en los últimos 30 días."
+                case .all: return activeTab == .camera ? "No se encontraron archivos en la microSD." : "No hay archivos en Local."
+                case .custom: return "No hay archivos en el rango seleccionado."
                 }
             }()
 
@@ -538,7 +635,7 @@ struct GalleryView: View {
         var dict: [String: [SDFileItem]] = [:]
         var order: [String] = []
 
-        for item in allFiles {
+        for item in displayedFiles {
             let dayKey = formatHumanDay(from: item.filename)
             if dict[dayKey] == nil {
                 dict[dayKey] = []
@@ -627,6 +724,13 @@ struct GalleryView: View {
     }
 
     private func initialLoad() {
+        if !camera.isConnected {
+            if !localLibrary.assets.isEmpty {
+                activeTab = .local
+            }
+            isLoading = false
+            return
+        }
         isLoading = true
         camera.fetchStorageStatus()
         camera.listDCIMFolders { list in
@@ -672,6 +776,12 @@ struct GalleryView: View {
     }
 
     private func deleteSingleFile(_ item: SDFileItem) {
+        if activeTab == .local {
+            localLibrary.deleteAsset(id: item.id)
+            alertMessage = "Archivo eliminado de la Biblioteca Local (sigue en la microSD)."
+            showAlert = true
+            return
+        }
         camera.deleteSDFile(folder: item.folder, filename: item.filename) { ok in
             if ok {
                 allFiles.removeAll(where: { $0.id == item.id })
@@ -684,8 +794,19 @@ struct GalleryView: View {
     }
 
     private func executeBatchDelete() {
-        let targets = allFiles.filter { selectedItemIDs.contains($0.id) }
+        let targets = displayedFiles.filter { selectedItemIDs.contains($0.id) }
         guard !targets.isEmpty else { return }
+
+        if activeTab == .local {
+            for item in targets {
+                localLibrary.deleteAsset(id: item.id)
+            }
+            isSelectionMode = false
+            selectedItemIDs.removeAll()
+            alertMessage = "Archivos eliminados de la Biblioteca Local."
+            showAlert = true
+            return
+        }
 
         func deleteNext(items: [SDFileItem]) {
             guard let first = items.first else {
@@ -710,7 +831,7 @@ struct GalleryView: View {
     }
 
     private func executeBatchDownload() {
-        let targets = allFiles.filter { selectedItemIDs.contains($0.id) }
+        let targets = displayedFiles.filter { selectedItemIDs.contains($0.id) }
         guard !targets.isEmpty else { return }
 
         func downloadNext(items: [SDFileItem], successCount: Int) {

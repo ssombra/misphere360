@@ -42,13 +42,74 @@ public class MediaDownloader: ObservableObject {
                 self.statusMessage = "Buscando \(item.filename)..."
             }
 
+            // Si ya existe en Local, exportar directamente desde el iPhone sin usar Wi-Fi
+            if let localAsset = LocalLibraryManager.shared.asset(for: item) {
+                let localOrig = LocalLibraryManager.shared.originalURL(for: localAsset)
+                let ext = item.isVideo ? "MP4" : "JPG"
+                let tempCopy = FileManager.default.temporaryDirectory.appendingPathComponent("MiSphere_\(UUID().uuidString).\(ext)")
+                try? FileManager.default.removeItem(at: tempCopy)
+                if (try? FileManager.default.copyItem(at: localOrig, to: tempCopy)) != nil {
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        self.exportFileToPhotos(destinationURL: tempCopy, item: item, mode: mode, completion: completion)
+                    }
+                    return
+                }
+            }
+
             self.buildAndTryCandidates(item: item, mode: mode, completion: completion)
         }
     }
 
-    private func buildCandidateURLs(for item: SDFileItem) -> [URL] {
+    /// Descarga un archivo desde la cámara y lo guarda únicamente en la biblioteca local privada de la app.
+    public func downloadToLocalLibrary(item: SDFileItem, completion: @escaping (Bool, String) -> Void) {
+        if LocalLibraryManager.shared.isDownloaded(item) {
+            DispatchQueue.main.async {
+                completion(true, "\(item.filename) ya está guardado en Local.")
+            }
+            return
+        }
+
+        DispatchQueue.main.async {
+            self.isDownloading = true
+            self.downloadProgress = 0.0
+            self.statusMessage = "Guardando \(item.filename) en Local..."
+        }
+
+        downloadToTemporaryFile(item: item) { [weak self] tempURL in
+            guard let self = self else { return }
+            guard let tempURL = tempURL else {
+                DispatchQueue.main.async {
+                    self.isDownloading = false
+                    completion(false, "No se pudo descargar \(item.filename) de la cámara.")
+                }
+                return
+            }
+
+            var stitched: UIImage? = nil
+            if !item.isVideo {
+                DispatchQueue.main.async {
+                    self.statusMessage = "Cosiendo vista 360° para Local..."
+                }
+                stitched = PhotoStitcher.shared.stitchForInteractivePreview(from: tempURL, maxPixelSize: 3840)
+            }
+
+            LocalLibraryManager.shared.saveMedia(item: item, originalTempURL: tempURL, stitchedImage: stitched) { saved in
+                try? FileManager.default.removeItem(at: tempURL)
+                DispatchQueue.main.async {
+                    self.isDownloading = false
+                    if saved != nil {
+                        completion(true, "\(item.filename) guardado en Biblioteca Local.")
+                    } else {
+                        completion(false, "No se pudo guardar \(item.filename) en Local.")
+                    }
+                }
+            }
+        }
+    }
+
+    private func buildCandidateURLs(for item: SDFileItem, preferPreviewProxy: Bool = false) -> [URL] {
         let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let nameVariants = filenameVariants(for: item.filename)
+        let nameVariants = filenameVariants(for: item.filename, preferPreviewProxy: preferPreviewProxy)
 
         var prefixes = ["/DCIM", "", "/SD0/DCIM", "/tmp/SD0/DCIM"]
         if let remembered = rememberedWorkingPrefix {
@@ -69,8 +130,8 @@ public class MediaDownloader: ObservableObject {
     }
 
     /// Resuelve la URL HTTP directa en la cámara (mediante HEAD) para streaming de video sin descargar todo el archivo
-    public func resolveMediaURL(item: SDFileItem, completion: @escaping (URL?, Int64?) -> Void) {
-        let candidates = buildCandidateURLs(for: item)
+    public func resolveMediaURL(item: SDFileItem, preferPreviewProxy: Bool = false, completion: @escaping (URL?, Int64?) -> Void) {
+        let candidates = buildCandidateURLs(for: item, preferPreviewProxy: preferPreviewProxy)
         probeNextURL(candidates: candidates) { [weak self] foundURL, contentLength in
             if let foundURL = foundURL {
                 completion(foundURL, contentLength)
@@ -178,7 +239,7 @@ public class MediaDownloader: ObservableObject {
         task.resume()
     }
 
-    private func filenameVariants(for filename: String) -> [String] {
+    private func filenameVariants(for filename: String, preferPreviewProxy: Bool = false) -> [String] {
         let clean = filename.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         var variants: [String] = []
         let upper = clean.uppercased()
@@ -201,17 +262,19 @@ public class MediaDownloader: ObservableObject {
             }
         } else if upper.hasSuffix(".MP4") {
             let stem: String
-            if upper.hasSuffix("AA.MP4") {
+            if upper.hasSuffix("AA.MP4") || upper.hasSuffix("AB.MP4") {
                 stem = String(clean.dropLast(6))
-                variants.append(clean)
-                variants.append("\(stem).MP4")
-                variants.append("\(stem)aa.mp4")
             } else {
                 stem = String(clean.dropLast(4))
-                variants.append("\(stem)AA.MP4")
-                variants.append(clean)
-                variants.append("\(stem)aa.mp4")
             }
+            if preferPreviewProxy {
+                variants.append("\(stem)AB.MP4")
+                variants.append("\(stem)ab.mp4")
+            }
+            variants.append("\(stem)AA.MP4")
+            variants.append(clean)
+            variants.append("\(stem).MP4")
+            variants.append("\(stem)aa.mp4")
         } else {
             variants.append(clean)
         }
@@ -372,66 +435,7 @@ public class MediaDownloader: ObservableObject {
                     return
                 }
 
-                DispatchQueue.main.async {
-                    self.statusMessage = (mode == .stitched360 || mode == .both) && !item.isVideo
-                        ? "Procesando metadatos 360°..."
-                        : "Guardando en Apple Fotos..."
-                }
-
-                // Recuperar la coordenada satelital registrada en el momento exacto en que se tomó esta foto
-                let shotLocation = LocationManager.shared.getBestLocation(for: item.filename)
-
-                // Procesar según el modo elegido por el usuario (Solo 360°, Solo Original, o Ambas)
-                let filesToSave = PhotoStitcher.shared.processDownloadedFile(
-                    at: destinationURL,
-                    isVideo: item.isVideo,
-                    mode: mode,
-                    location: shotLocation
-                )
-
-                PHPhotoLibrary.shared().performChanges({
-                    for fileURL in filesToSave {
-                        if item.isVideo {
-                            let req = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
-                            if let loc = shotLocation {
-                                req?.location = loc
-                            }
-                        } else {
-                            let req = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
-                            if let loc = shotLocation {
-                                req?.location = loc
-                            }
-                        }
-                    }
-                }) { success, saveError in
-                    // Limpiar copias temporales
-                    try? FileManager.default.removeItem(at: destinationURL)
-                    for fileURL in filesToSave where fileURL != destinationURL {
-                        try? FileManager.default.removeItem(at: fileURL)
-                    }
-
-                    DispatchQueue.main.async {
-                        self.isDownloading = false
-                        if success {
-                            let msg: String
-                            if item.isVideo {
-                                msg = "¡Video guardado en tu Carrete de Apple Fotos!"
-                            } else {
-                                switch mode {
-                                case .stitched360:
-                                    msg = "¡Foto 360° (con metadatos interactivos GPano) guardada en Fotos!"
-                                case .both:
-                                    msg = "¡Se guardaron ambas fotos (Original + versión 360°) en Fotos!"
-                                case .original:
-                                    msg = "¡Foto original guardada en Fotos!"
-                                }
-                            }
-                            completion(true, msg)
-                        } else {
-                            completion(false, saveError?.localizedDescription ?? "Error al escribir en Carrete de Fotos.")
-                        }
-                    }
-                }
+                self.exportFileToPhotos(destinationURL: destinationURL, item: item, mode: mode, completion: completion)
             } else {
                 var errDesc = "HTTP \(statusCode)"
                 if let err = error {
@@ -450,5 +454,73 @@ public class MediaDownloader: ObservableObject {
             }
         }
         task.resume()
+    }
+
+    private func exportFileToPhotos(
+        destinationURL: URL,
+        item: SDFileItem,
+        mode: StitchMode,
+        completion: @escaping (Bool, String) -> Void
+    ) {
+        DispatchQueue.main.async {
+            self.statusMessage = (mode == .stitched360 || mode == .both) && !item.isVideo
+                ? "Procesando metadatos 360°..."
+                : "Guardando en Apple Fotos..."
+        }
+
+        let shotLocation = LocationManager.shared.getBestLocation(for: item.filename)
+        let filesToSave = PhotoStitcher.shared.processDownloadedFile(
+            at: destinationURL,
+            isVideo: item.isVideo,
+            mode: mode,
+            location: shotLocation
+        )
+
+        PHPhotoLibrary.shared().performChanges({
+            for fileURL in filesToSave {
+                if item.isVideo {
+                    let req = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
+                    if let loc = shotLocation {
+                        req?.location = loc
+                    }
+                } else {
+                    let req = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
+                    if let loc = shotLocation {
+                        req?.location = loc
+                    }
+                }
+            }
+        }) { success, saveError in
+            try? FileManager.default.removeItem(at: destinationURL)
+            for fileURL in filesToSave where fileURL != destinationURL {
+                try? FileManager.default.removeItem(at: fileURL)
+            }
+
+            if success {
+                LocalLibraryManager.shared.markExported(id: item.id)
+            }
+
+            DispatchQueue.main.async {
+                self.isDownloading = false
+                if success {
+                    let msg: String
+                    if item.isVideo {
+                        msg = "¡Video guardado en tu Carrete de Apple Fotos!"
+                    } else {
+                        switch mode {
+                        case .stitched360:
+                            msg = "¡Foto 360° (con metadatos interactivos GPano) guardada en Fotos!"
+                        case .both:
+                            msg = "¡Se guardaron ambas fotos (Original + versión 360°) en Fotos!"
+                        case .original:
+                            msg = "¡Foto original guardada en Fotos!"
+                        }
+                    }
+                    completion(true, msg)
+                } else {
+                    completion(false, saveError?.localizedDescription ?? "Error al escribir en Carrete de Fotos.")
+                }
+            }
+        }
     }
 }
