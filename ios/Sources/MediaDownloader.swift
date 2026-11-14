@@ -492,6 +492,7 @@ public class MediaDownloader: ObservableObject {
             VideoStitcher.shared.stitchVideo(
                 inputURL: destinationURL,
                 outputURL: stitchedURL,
+                location: shotLocation,
                 progress: { [weak self] p in
                     self?.downloadProgress = Float(p)
                     self?.statusMessage = "Cosiendo video 360°... \(Int(p * 100))%"

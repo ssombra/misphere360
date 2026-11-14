@@ -616,6 +616,7 @@ public class CameraManager: ObservableObject {
                     if rvalVal == 0 || rvalVal == 128 {
                         self.isRecording = true
                         self.lastStatusMessage = "Grabando video (\(msgId))..."
+                        LocationManager.shared.recordCurrentShotLocation()
                     } else if rvalVal == -1 {
                         // La cámara suele emitir un rval:-1 transitorio antes del 0/128 al arrancar video
                         print("⚠️ Respuesta transitoria en inicio de video (\(msgId), rval:-1)")
@@ -646,6 +647,7 @@ public class CameraManager: ObservableObject {
                     NotificationCenter.default.post(name: NSNotification.Name("CameraPhotoSavedNotification"), object: nil)
                 } else if msgId == 8192 {
                     // Video terminado y guardado en microSD (fundamental para Video Corto automático)
+                    LocationManager.shared.recordCurrentShotLocation()
                     self.isRecording = false
                     self.lastStatusMessage = "🎥 Video guardado en SD (8192)"
                 }

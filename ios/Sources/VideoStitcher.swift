@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreVideo
+import CoreLocation
 import Metal
 import UIKit
 
@@ -134,10 +135,11 @@ public final class VideoStitcher {
         }
     }
 
-    /// Cose un MP4 dual-fisheye a equirrectangular 2:1 (H.264) e inyecta metadatos espaciales 360° (sv3d + GSpherical).
+    /// Cose un MP4 dual-fisheye a equirrectangular 2:1 (H.264) e inyecta metadatos espaciales 360° (sv3d + GSpherical) y GPS.
     public func stitchVideo(
         inputURL: URL,
         outputURL: URL,
+        location: CLLocation? = nil,
         progress: ((Double) -> Void)? = nil,
         completion: @escaping (Result<URL, Error>) -> Void
     ) {
@@ -175,6 +177,13 @@ public final class VideoStitcher {
                 reader = try AVAssetReader(asset: asset)
                 writer = try AVAssetWriter(outputURL: rawOutputURL, fileType: .mp4)
                 writer.shouldOptimizeForNetworkUse = true
+                if let loc = location {
+                    let item = AVMutableMetadataItem()
+                    item.keySpace = .common
+                    item.key = AVMetadataKey.commonKeyLocation as NSString
+                    item.value = String(format: "%+.6f%+.6f%+.1f/", loc.coordinate.latitude, loc.coordinate.longitude, loc.altitude) as NSString
+                    writer.metadata = [item]
+                }
             } catch {
                 completion(.failure(error))
                 return
