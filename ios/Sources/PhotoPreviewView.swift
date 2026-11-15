@@ -417,12 +417,29 @@ public struct PhotoPreviewView: View {
     }
 }
 
+public enum PreferredMapsApp: String, CaseIterable {
+    case ask = "ask"
+    case apple = "apple"
+    case google = "google"
+
+    var displayName: String {
+        switch self {
+        case .ask: return "Preguntar"
+        case .apple: return "Apple Maps"
+        case .google: return "Google Maps"
+        }
+    }
+}
+
 /// Hoja modal de detalles de la foto (metadatos, dimensiones, GPS)
 struct PhotoInfoSheetView: View {
     let item: SDFileItem
     let fileSizeFormatted: String
     @Environment(\.dismiss) var dismiss
+    @AppStorage("preferredMapsApp") private var preferredMapsApp: String = PreferredMapsApp.ask.rawValue
     @State private var embeddedLocation: CLLocation? = nil
+    @State private var showMapsChoiceDialog = false
+    @State private var pendingCoordinate: CLLocationCoordinate2D? = nil
 
     private var resolvedLocation: (location: CLLocation, isEmbedded: Bool)? {
         if let embedded = embeddedLocation {
@@ -460,7 +477,13 @@ struct PhotoInfoSheetView: View {
                             value: resolved.isEmbedded ? "GPS incrustado en archivo" : "GPS Vinculado con iPhone",
                             valueColor: .green
                         )
-                        infoRow(icon: "location.north.line", label: "Coordenadas", value: String(format: "%.5f, %.5f", loc.coordinate.latitude, loc.coordinate.longitude))
+                        Button {
+                            handleCoordinateTap(loc.coordinate)
+                        } label: {
+                            infoRow(icon: "location.north.line", label: "Coordenadas", value: String(format: "%.5f, %.5f", loc.coordinate.latitude, loc.coordinate.longitude))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                         if loc.verticalAccuracy >= 0 {
                             infoRow(icon: "mountain.2", label: "Altitud", value: String(format: "%.1f m", loc.altitude))
                         }
@@ -486,9 +509,63 @@ struct PhotoInfoSheetView: View {
             .onAppear {
                 loadEmbeddedLocation()
             }
+            .confirmationDialog(
+                "Abrir ubicación en...",
+                isPresented: $showMapsChoiceDialog,
+                titleVisibility: .visible
+            ) {
+                Button("Apple Maps") {
+                    preferredMapsApp = PreferredMapsApp.apple.rawValue
+                    if let coord = pendingCoordinate {
+                        openInAppleMaps(coord)
+                    }
+                }
+                if canOpenGoogleMaps() {
+                    Button("Google Maps") {
+                        preferredMapsApp = PreferredMapsApp.google.rawValue
+                        if let coord = pendingCoordinate {
+                            openInGoogleMaps(coord)
+                        }
+                    }
+                }
+                Button("Cancelar", role: .cancel) {}
+            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+    }
+
+    private func handleCoordinateTap(_ coord: CLLocationCoordinate2D) {
+        switch PreferredMapsApp(rawValue: preferredMapsApp) ?? .ask {
+        case .apple:
+            openInAppleMaps(coord)
+        case .google:
+            openInGoogleMaps(coord)
+        case .ask:
+            pendingCoordinate = coord
+            showMapsChoiceDialog = true
+        }
+    }
+
+    private func canOpenGoogleMaps() -> Bool {
+        guard let url = URL(string: "comgooglemaps://") else { return false }
+        return UIApplication.shared.canOpenURL(url)
+    }
+
+    private func openInAppleMaps(_ coord: CLLocationCoordinate2D) {
+        let urlStr = "https://maps.apple.com/?ll=\(coord.latitude),\(coord.longitude)&q=\(coord.latitude),\(coord.longitude)"
+        if let url = URL(string: urlStr) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    private func openInGoogleMaps(_ coord: CLLocationCoordinate2D) {
+        let googleStr = "comgooglemaps://?q=\(coord.latitude),\(coord.longitude)&center=\(coord.latitude),\(coord.longitude)&zoom=16"
+        if let url = URL(string: googleStr), UIApplication.shared.canOpenURL(url) {
+            UIApplication.shared.open(url)
+        } else {
+            openInAppleMaps(coord)
+        }
     }
 
     private func loadEmbeddedLocation() {

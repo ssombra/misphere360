@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var isCalibratingGyro = false
     @State private var gyroAlertMessage = ""
     @State private var showGyroResultAlert = false
+    @AppStorage("preferredMapsApp") private var preferredMapsApp: String = PreferredMapsApp.ask.rawValue
 
     var body: some View {
         NavigationView {
@@ -229,6 +230,14 @@ struct SettingsView: View {
                         Spacer()
                         Text("1.0.0 iOS")
                             .foregroundColor(.secondary)
+                    }
+                }
+
+                Section(header: Text("Preferencias")) {
+                    Picker("App de Mapas", selection: $preferredMapsApp) {
+                        ForEach(PreferredMapsApp.allCases, id: \.rawValue) { app in
+                            Text(app.displayName).tag(app.rawValue)
+                        }
                     }
                 }
             }

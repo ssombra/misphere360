@@ -22,6 +22,10 @@
     <string>1</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>comgooglemaps</string>
+    </array>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Mi Sphere 360 necesita conectarse a la red Wi-Fi local de tu cámara (192.168.42.1) para enviar comandos y ver en vivo.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
