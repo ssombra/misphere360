@@ -41,10 +41,15 @@ final class VideoPreviewController: ObservableObject {
         }
 
         // 2. Streaming desde la cámara priorizando el proxy AB.MP4 si existe
+        ThumbnailCache.shared.setDownloadSuspended(true)
         MediaDownloader.shared.resolveMediaURL(item: item, preferPreviewProxy: true) { [weak self] url, contentLength in
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self = self else {
+                    ThumbnailCache.shared.setDownloadSuspended(false)
+                    return
+                }
                 guard let url = url else {
+                    ThumbnailCache.shared.setDownloadSuspended(false)
                     self.isLoading = false
                     self.errorMessage = "No se encontró el archivo de video en la cámara. Comprueba la conexión Wi-Fi."
                     return
@@ -58,8 +63,9 @@ final class VideoPreviewController: ObservableObject {
     }
 
     private func startPlayer(with url: URL) {
-        let asset = AVURLAsset(url: url)
+        let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: false])
         let playerItem = AVPlayerItem(asset: asset)
+        playerItem.preferredForwardBufferDuration = 2.0
 
         let attrs: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
@@ -77,6 +83,7 @@ final class VideoPreviewController: ObservableObject {
                 guard let self = self else { return }
                 switch item.status {
                 case .readyToPlay:
+                    ThumbnailCache.shared.setDownloadSuspended(false)
                     self.isLoading = false
                     let dur = item.duration.seconds
                     if dur.isFinite && dur > 0 {
@@ -84,6 +91,7 @@ final class VideoPreviewController: ObservableObject {
                     }
                     self.avPlay()
                 case .failed:
+                    ThumbnailCache.shared.setDownloadSuspended(false)
                     self.isLoading = false
                     self.errorMessage = item.error?.localizedDescription ?? "No se pudo reproducir el video."
                 default:
@@ -185,6 +193,7 @@ final class VideoPreviewController: ObservableObject {
     }
 
     func stopAndCleanup() {
+        ThumbnailCache.shared.setDownloadSuspended(false)
         displayLink?.invalidate()
         displayLink = nil
 

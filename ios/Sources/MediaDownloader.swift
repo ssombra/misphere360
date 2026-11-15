@@ -13,7 +13,7 @@ public class MediaDownloader: ObservableObject {
     @Published public var statusMessage: String = ""
 
     /// Prefijo de ruta que ya funcionó previamente (ej. "", "/DCIM", etc.) para acelerar descargas siguientes
-    private var rememberedWorkingPrefix: String? = nil
+    public var rememberedWorkingPrefix: String? = nil
 
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -138,15 +138,80 @@ public class MediaDownloader: ObservableObject {
     /// Resuelve la URL HTTP directa en la cámara (mediante HEAD) para streaming de video sin descargar todo el archivo
     public func resolveMediaURL(item: SDFileItem, preferPreviewProxy: Bool = false, completion: @escaping (URL?, Int64?) -> Void) {
         let candidates = buildCandidateURLs(for: item, preferPreviewProxy: preferPreviewProxy)
-        probeNextURL(candidates: candidates) { [weak self] foundURL, contentLength in
+        let batch = Array(candidates.prefix(4))
+        let rest = Array(candidates.dropFirst(4))
+
+        probeBatchInParallel(candidates: batch) { [weak self] foundURL, contentLength in
             if let foundURL = foundURL {
                 completion(foundURL, contentLength)
             } else {
-                let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                self?.discoverCherokeeExactLink(folder: cleanFolder, filename: item.filename) { discURL in
-                    completion(discURL, nil)
+                self?.probeNextURL(candidates: rest) { [weak self] fallbackURL, fallbackLength in
+                    if let fallbackURL = fallbackURL {
+                        completion(fallbackURL, fallbackLength)
+                    } else {
+                        let cleanFolder = item.folder.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                        self?.discoverCherokeeExactLink(folder: cleanFolder, filename: item.filename) { discURL in
+                            completion(discURL, nil)
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    private func probeBatchInParallel(candidates: [URL], completion: @escaping (URL?, Int64?) -> Void) {
+        guard !candidates.isEmpty else {
+            completion(nil, nil)
+            return
+        }
+
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var bestIndex = Int.max
+        var bestURL: URL?
+        var bestSize: Int64?
+
+        for (index, url) in candidates.enumerated() {
+            group.enter()
+            var req = URLRequest(url: url)
+            req.httpMethod = "HEAD"
+            req.timeoutInterval = 3.0
+
+            URLSession.shared.dataTask(with: req) { _, response, error in
+                defer { group.leave() }
+                if let http = response as? HTTPURLResponse, http.statusCode == 200, error == nil {
+                    let size = http.expectedContentLength > 0 ? http.expectedContentLength : nil
+                    lock.lock()
+                    if index < bestIndex {
+                        bestIndex = index
+                        bestURL = url
+                        bestSize = size
+                    }
+                    lock.unlock()
+                }
+            }.resume()
+        }
+
+        group.notify(queue: .global(qos: .userInitiated)) { [weak self] in
+            if let url = bestURL {
+                self?.rememberPrefix(from: url)
+                completion(url, bestSize)
+            } else {
+                completion(nil, nil)
+            }
+        }
+    }
+
+    private func rememberPrefix(from url: URL) {
+        let pathStr = url.path
+        if pathStr.contains("/tmp/SD0/DCIM/") {
+            rememberedWorkingPrefix = "/tmp/SD0/DCIM"
+        } else if pathStr.contains("/SD0/DCIM/") {
+            rememberedWorkingPrefix = "/SD0/DCIM"
+        } else if pathStr.contains("/DCIM/") {
+            rememberedWorkingPrefix = "/DCIM"
+        } else {
+            rememberedWorkingPrefix = ""
         }
     }
 
@@ -158,20 +223,11 @@ public class MediaDownloader: ObservableObject {
         let remaining = Array(candidates.dropFirst())
         var req = URLRequest(url: currentURL)
         req.httpMethod = "HEAD"
-        req.timeoutInterval = 4.0
+        req.timeoutInterval = 3.0
 
         URLSession.shared.dataTask(with: req) { [weak self] _, response, error in
             if let http = response as? HTTPURLResponse, http.statusCode == 200, error == nil {
-                let pathStr = currentURL.path
-                if pathStr.contains("/DCIM/") {
-                    self?.rememberedWorkingPrefix = "/DCIM"
-                } else if pathStr.contains("/SD0/DCIM/") {
-                    self?.rememberedWorkingPrefix = "/SD0/DCIM"
-                } else if pathStr.contains("/tmp/SD0/DCIM/") {
-                    self?.rememberedWorkingPrefix = "/tmp/SD0/DCIM"
-                } else {
-                    self?.rememberedWorkingPrefix = ""
-                }
+                self?.rememberPrefix(from: currentURL)
                 let size = http.expectedContentLength > 0 ? http.expectedContentLength : nil
                 completion(currentURL, size)
             } else {

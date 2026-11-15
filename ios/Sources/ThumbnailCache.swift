@@ -27,6 +27,11 @@ public class ThumbnailCache: ObservableObject {
         try? FileManager.default.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
     }
 
+    /// Pausa o reanuda la cola de miniaturas para priorizar el ancho de banda de un visor activo
+    public func setDownloadSuspended(_ suspended: Bool) {
+        downloadQueue.isSuspended = suspended
+    }
+
     private func cacheKey(for item: SDFileItem) -> String {
         let base = "\(item.folder)_\(item.filename)"
             .replacingOccurrences(of: "/", with: "_")
@@ -104,7 +109,7 @@ public class ThumbnailCache: ObservableObject {
         }
 
         var prefixes = ["/DCIM", "", "/SD0/DCIM", "/tmp/SD0/DCIM"]
-        if let pref = rememberedPrefix {
+        if let pref = MediaDownloader.shared.rememberedWorkingPrefix ?? rememberedPrefix {
             prefixes.removeAll(where: { $0 == pref })
             prefixes.insert(pref, at: 0)
         }
@@ -279,14 +284,21 @@ public class ThumbnailCache: ObservableObject {
                     didSucceed = true
                     self.saveThumbnailToCaches(thumb, key: key)
 
-                    // Recordar prefijo exitoso
+                    // Recordar prefijo exitoso y compartirlo con MediaDownloader
                     let path = url.path
-                    if path.contains("/DCIM/") {
-                        self.rememberedPrefix = "/DCIM"
+                    let detectedPrefix: String
+                    if path.contains("/tmp/SD0/DCIM/") {
+                        detectedPrefix = "/tmp/SD0/DCIM"
                     } else if path.contains("/SD0/DCIM/") {
-                        self.rememberedPrefix = "/SD0/DCIM"
+                        detectedPrefix = "/SD0/DCIM"
+                    } else if path.contains("/DCIM/") {
+                        detectedPrefix = "/DCIM"
                     } else {
-                        self.rememberedPrefix = ""
+                        detectedPrefix = ""
+                    }
+                    self.rememberedPrefix = detectedPrefix
+                    if MediaDownloader.shared.rememberedWorkingPrefix == nil {
+                        MediaDownloader.shared.rememberedWorkingPrefix = detectedPrefix
                     }
                 }
             }

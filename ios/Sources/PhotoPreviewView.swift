@@ -13,6 +13,7 @@ public struct PhotoPreviewView: View {
 
     @State private var stitchedImage: UIImage?
     @State private var isLoading: Bool
+    @State private var isUpgradingResolution = false
     @State private var loadingMessage = "Cargando foto desde la cámara..."
     @State private var enableGyro = false
     @State private var projectionMode: PhotoProjectionMode = .normal
@@ -114,6 +115,22 @@ public struct PhotoPreviewView: View {
 
             // 2. Controles Superiores Flotantes (Minimalistas, solo íconos)
             VStack {
+                if isUpgradingResolution {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .scaleEffect(0.75)
+                        Text("Cargando alta resolución...")
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .background(Color.black.opacity(0.45))
+                    .clipShape(Capsule())
+                    .padding(.top, 8)
+                }
                 HStack {
                     // Botón Cerrar (Izquierda)
                     Button {
@@ -281,6 +298,9 @@ public struct PhotoPreviewView: View {
                 loadAndStitchPreview()
             }
         }
+        .onDisappear {
+            ThumbnailCache.shared.setDownloadSuspended(false)
+        }
         .alert("¿Eliminar archivo de la microSD?", isPresented: $showDeleteConfirm) {
             Button("Cancelar", role: .cancel) {}
             Button("Eliminar", role: .destructive) {
@@ -348,14 +368,25 @@ public struct PhotoPreviewView: View {
             }
         }
 
-        // 2. No está en Local: descargar de la cámara, coser y guardar automáticamente en Local
-        loadingMessage = "Descargando para vista previa 360°..."
+        // 2. No está en Local: mostrar miniatura cacheada de inmediato si existe mientras descarga el original
+        if self.stitchedImage == nil, let cachedThumb = ThumbnailCache.shared.getThumbnail(for: item) {
+            self.stitchedImage = cachedThumb
+            self.isLoading = false
+            self.isUpgradingResolution = true
+        } else {
+            loadingMessage = "Descargando para vista previa 360°..."
+        }
 
+        ThumbnailCache.shared.setDownloadSuspended(true)
         MediaDownloader.shared.downloadToTemporaryFile(item: item) { localURL in
+            ThumbnailCache.shared.setDownloadSuspended(false)
             guard let localURL = localURL else {
                 DispatchQueue.main.async {
                     self.isLoading = false
-                    self.errorMessage = "No se pudo cargar la vista previa. Comprueba la conexión Wi-Fi con la cámara."
+                    self.isUpgradingResolution = false
+                    if self.stitchedImage == nil {
+                        self.errorMessage = "No se pudo cargar la vista previa. Comprueba la conexión Wi-Fi con la cámara."
+                    }
                 }
                 return
             }
@@ -384,12 +415,15 @@ public struct PhotoPreviewView: View {
                 }
 
                 DispatchQueue.main.async {
+                    self.isUpgradingResolution = false
                     if let img = previewImg {
                         self.stitchedImage = img
                         self.isLoading = false
                     } else {
                         self.isLoading = false
-                        self.errorMessage = "No se pudo generar la vista 360°."
+                        if self.stitchedImage == nil {
+                            self.errorMessage = "No se pudo generar la vista 360°."
+                        }
                     }
                 }
             }
