@@ -107,19 +107,33 @@ public class CameraManager: ObservableObject {
         }
     }
 
-    // Callbacks pendientes para comandos TCP asíncronos (ej. list_dir)
-    // Callbacks pendientes para comandos TCP asíncronos (cola FIFO por msgId)
-    private var pendingCallbacks: [Int: [([String: Any]) -> Void]] = [:]
+    private struct PendingCallback {
+        let id: UUID
+        let callback: ([String: Any]) -> Void
+        let timeoutWorkItem: DispatchWorkItem
+    }
+
+    // Callbacks pendientes para comandos TCP asíncronos (cola FIFO por msgId con timeout)
+    private var pendingCallbacks: [Int: [PendingCallback]] = [:]
     private var lastSendTime: TimeInterval = 0.0
+    private var lastReceiveTime: TimeInterval = 0.0
     private var hasSyncedSettingsOnConnect = false
 
     private var connection: NWConnection?
+    private var connectionGeneration: UInt64 = 0
+    private var isSocketConnected = false
+    private var isSocketConnecting = false
+    private var isBackgrounded = false
     private let queue = DispatchQueue(label: "com.ssombra.misphere360.tcp", qos: .userInitiated)
     private var watchdogTimer: DispatchSourceTimer?
     private var handshakeTimeoutItem: DispatchWorkItem?
     private var reconnectWorkItem: DispatchWorkItem?
     private var isUserDisconnected = false
-    private var receiveBuffer = ""
+    private var receiveBuffer = Data()
+
+    // Cola serial para operaciones compuestas de microSD (CHANGE_DIR 1283 + LIST_DIR 1282)
+    private var sdOperationQueue: [(@escaping () -> Void) -> Void] = []
+    private var isExecutingSDOperation = false
 
     public init() {
         loadPersistedSettings()
@@ -130,7 +144,30 @@ public class CameraManager: ObservableObject {
         stopWatchdog()
     }
 
-    // MARK: - Reconexión Automática y Watchdog en Segundo Plano
+    // MARK: - Reconexión Automática, Ciclo de Vida y Watchdog en Segundo Plano
+
+    public func handleAppDidEnterBackground() {
+        queue.async {
+            self.isBackgrounded = true
+            self.handshakeTimeoutItem?.cancel()
+            self.reconnectWorkItem?.cancel()
+            if self.isSocketConnected && self.sessionToken > 0 {
+                let packet: [String: Any] = ["msg_id": 258, "token": self.sessionToken]
+                self.sendRawJSON(packet)
+            }
+            self.connection?.cancel()
+            self.cleanupConnectionLocked()
+        }
+    }
+
+    public func handleAppDidBecomeActive() {
+        queue.async {
+            self.isBackgrounded = false
+            if !self.isUserDisconnected && !self.isSocketConnected && !self.isSocketConnecting {
+                self.connectLocked()
+            }
+        }
+    }
 
     private func startWatchdog() {
         stopWatchdog()
@@ -138,20 +175,35 @@ public class CameraManager: ObservableObject {
         timer.schedule(deadline: .now() + 1.0, repeating: 2.5)
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
-            if !self.isUserDisconnected {
-                if !self.isConnected && !self.isConnecting {
-                    self.connect()
-                } else if self.isConnected {
-                    let now = Date().timeIntervalSince1970
-                    // Heartbeat cada 15 segundos para evitar que la cámara cierre la sesión TCP
-                    if now - self.lastSendTime > 15.0 {
-                        self.fetchBatteryStatus()
-                    }
+            guard !self.isUserDisconnected && !self.isBackgrounded else { return }
+
+            if !self.isSocketConnected && !self.isSocketConnecting {
+                self.connectLocked()
+            } else if self.isSocketConnected {
+                let now = Date().timeIntervalSince1970
+                // Heartbeat cada 15 segundos verificando respuesta real para detectar sockets zombi
+                if now - self.lastSendTime > 15.0 {
+                    self.sendHeartbeatCheck()
                 }
             }
         }
         timer.resume()
         self.watchdogTimer = timer
+    }
+
+    private func sendHeartbeatCheck() {
+        sendCommand(msgId: 4361, param: nil) { [weak self] resp in
+            guard let self = self else { return }
+            if resp["timeout"] as? Bool == true {
+                print("Heartbeat sin respuesta — reconectando socket...")
+                self.queue.async {
+                    guard self.isSocketConnected else { return }
+                    self.connection?.cancel()
+                    self.cleanupConnectionLocked()
+                    self.scheduleAutoReconnect(delay: 0.5)
+                }
+            }
+        }
     }
 
     private func stopWatchdog() {
@@ -160,28 +212,52 @@ public class CameraManager: ObservableObject {
     }
 
     public func checkAndReconnectIfNeeded() {
-        isUserDisconnected = false
-        if !isConnected && !isConnecting {
-            connect()
+        queue.async {
+            self.isUserDisconnected = false
+            self.isBackgrounded = false
+            if !self.isSocketConnected && !self.isSocketConnecting {
+                self.connectLocked()
+            }
         }
     }
 
     public func scheduleAutoReconnect(delay: Double = 1.0) {
-        guard !isUserDisconnected else { return }
-        reconnectWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in
-            guard let self = self, !self.isConnected, !self.isConnecting, !self.isUserDisconnected else { return }
-            self.connect()
+        queue.async {
+            guard !self.isUserDisconnected && !self.isBackgrounded else { return }
+            self.reconnectWorkItem?.cancel()
+            let item = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                self.queue.async {
+                    guard !self.isSocketConnected, !self.isSocketConnecting,
+                          !self.isUserDisconnected, !self.isBackgrounded else { return }
+                    self.connectLocked()
+                }
+            }
+            self.reconnectWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
         }
-        reconnectWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
 
     // MARK: - Conexión y Desconexión
 
     public func connect() {
-        guard !isConnected && !isConnecting else { return }
-        isUserDisconnected = false
+        queue.async {
+            self.isUserDisconnected = false
+            self.isBackgrounded = false
+            self.connectLocked()
+        }
+    }
+
+    private func connectLocked() {
+        guard !isSocketConnected && !isSocketConnecting else { return }
+        isSocketConnecting = true
+        connectionGeneration &+= 1
+        let gen = connectionGeneration
+
+        // Cerrar cualquier conexión previa antes de abrir una nueva
+        connection?.cancel()
+        connection = nil
+        receiveBuffer.removeAll()
 
         DispatchQueue.main.async {
             self.isConnecting = true
@@ -194,60 +270,78 @@ public class CameraManager: ObservableObject {
         tcpOptions.enableKeepalive = true
         tcpOptions.keepaliveIdle = 10
         let params = NWParameters(tls: nil, tcp: tcpOptions)
+        params.requiredInterfaceType = .wifi
 
-        connection = NWConnection(host: host, port: port, using: params)
-        connection?.stateUpdateHandler = { [weak self] state in
+        let newConn = NWConnection(host: host, port: port, using: params)
+        connection = newConn
+        newConn.stateUpdateHandler = { [weak self] state in
             guard let self = self else { return }
-            switch state {
-            case .ready:
-                self.queue.async {
-                    self.startReceiving()
-                    self.authenticateSession()
+            self.queue.async {
+                guard self.connectionGeneration == gen else { return }
+                switch state {
+                case .ready:
+                    self.startReceiving(generation: gen)
+                    self.authenticateSessionLocked()
+                case .failed(let error):
+                    print("TCP conexión falló: \(error.localizedDescription)")
+                    DispatchQueue.main.async {
+                        self.lastStatusMessage = "Reconectando..."
+                    }
+                    self.cleanupConnectionLocked()
+                    self.scheduleAutoReconnect(delay: 1.5)
+                case .cancelled:
+                    self.cleanupConnectionLocked()
+                    if !self.isUserDisconnected && !self.isBackgrounded {
+                        self.scheduleAutoReconnect(delay: 1.0)
+                    }
+                default:
+                    break
                 }
-            case .failed(let error):
-                print("TCP conexión falló: \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    self.isConnected = false
-                    self.isConnecting = false
-                    self.lastStatusMessage = "Reconectando..."
-                }
-                self.cleanupConnection()
-                self.scheduleAutoReconnect(delay: 1.5)
-            case .cancelled:
-                DispatchQueue.main.async {
-                    self.isConnected = false
-                    self.isConnecting = false
-                }
-                self.cleanupConnection()
-                if !self.isUserDisconnected {
-                    self.scheduleAutoReconnect(delay: 1.0)
-                }
-            default:
-                break
             }
         }
-        connection?.start(queue: queue)
+        newConn.start(queue: queue)
     }
 
     public func disconnect() {
-        isUserDisconnected = true
-        handshakeTimeoutItem?.cancel()
-        reconnectWorkItem?.cancel()
-        if isConnected && sessionToken > 0 {
-            sendCommand(msgId: 258, param: nil) // MSG_DISCONNECT
+        queue.async {
+            self.isUserDisconnected = true
+            self.handshakeTimeoutItem?.cancel()
+            self.reconnectWorkItem?.cancel()
+            if self.isSocketConnected && self.sessionToken > 0 {
+                let packet: [String: Any] = ["msg_id": 258, "token": self.sessionToken]
+                self.sendRawJSON(packet)
+            }
+            self.connection?.cancel()
+            self.cleanupConnectionLocked()
         }
-        connection?.cancel()
-        cleanupConnection()
     }
 
     private func cleanupConnection() {
-        handshakeTimeoutItem?.cancel()
         queue.async {
-            self.connection = nil
-            self.receiveBuffer = ""
-            self.pendingCallbacks.removeAll()
+            self.cleanupConnectionLocked()
         }
+    }
+
+    private func cleanupConnectionLocked() {
+        handshakeTimeoutItem?.cancel()
+        connectionGeneration &+= 1
+        connection = nil
+        receiveBuffer.removeAll()
+        isSocketConnected = false
+        isSocketConnecting = false
+
+        let drained = pendingCallbacks
+        pendingCallbacks.removeAll()
+        sdOperationQueue.removeAll()
+        isExecutingSDOperation = false
+
         DispatchQueue.main.async {
+            for list in drained.values {
+                for entry in list {
+                    entry.timeoutWorkItem.cancel()
+                    entry.callback(["rval": -1, "error": "Conexión cerrada"])
+                }
+            }
             self.isConnected = false
             self.isConnecting = false
             self.sessionToken = 0
@@ -258,23 +352,25 @@ public class CameraManager: ObservableObject {
 
     // MARK: - Autenticación
 
-    private func authenticateSession() {
-        queue.async {
-            let authPacket: [String: Any] = ["msg_id": 257, "token": 0]
-            self.sendRawJSON(authPacket)
-            self.lastSendTime = Date().timeIntervalSince1970
+    private func authenticateSessionLocked() {
+        let authPacket: [String: Any] = ["msg_id": 257, "token": 0]
+        self.sendRawJSON(authPacket)
+        self.lastSendTime = Date().timeIntervalSince1970
 
-            // Timeout de apretón de manos (5 segundos)
-            self.handshakeTimeoutItem?.cancel()
-            let timeout = DispatchWorkItem { [weak self] in
-                guard let self = self, !self.isConnected else { return }
+        // Timeout de apretón de manos (5 segundos)
+        self.handshakeTimeoutItem?.cancel()
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.queue.async {
+                guard !self.isSocketConnected else { return }
                 print("Apretón 257 agotó tiempo, reintentando...")
-                self.cleanupConnection()
+                self.connection?.cancel()
+                self.cleanupConnectionLocked()
                 self.scheduleAutoReconnect(delay: 0.5)
             }
-            self.handshakeTimeoutItem = timeout
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: timeout)
         }
+        self.handshakeTimeoutItem = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0, execute: timeout)
     }
 
     private func registerClientInfo(token: Int) {
@@ -316,42 +412,35 @@ public class CameraManager: ObservableObject {
 
     // MARK: - Envío y Recepción TCP (Garantizando param como String y pausa mínima)
 
-    public func sendCommand(msgId: Int, param: Any? = nil, onResponse: (([String: Any]) -> Void)? = nil) {
-        queue.async { [weak self] in
-            guard let self = self, let connection = self.connection, connection.state == .ready else { return }
-
-            // Respetar pausa mínima de 0.3s como exige el firmware Ambarella para no ignorar paquetes
-            let now = Date().timeIntervalSince1970
-            let elapsed = now - self.lastSendTime
-            if elapsed < 0.30 {
-                Thread.sleep(forTimeInterval: 0.30 - elapsed)
-            }
-
-            var packet: [String: Any] = [
-                "msg_id": msgId,
-                "token": self.sessionToken
-            ]
-            // REGLA CRÍTICA AMBARELLA: Todo parámetro debe enviarse como String
-            if let param = param {
-                packet["param"] = String(describing: param)
-            }
-
-            if let onResponse = onResponse {
-                self.pendingCallbacks[msgId, default: []].append(onResponse)
-            }
-
-            self.sendRawJSON(packet)
-            self.lastSendTime = Date().timeIntervalSince1970
+    public func sendCommand(msgId: Int, param: Any? = nil, timeout: TimeInterval? = nil, onResponse: (([String: Any]) -> Void)? = nil) {
+        var packet: [String: Any] = ["msg_id": msgId]
+        // REGLA CRÍTICA AMBARELLA: Todo parámetro debe enviarse como String
+        if let param = param {
+            packet["param"] = String(describing: param)
         }
+        enqueuePacket(packet, msgId: msgId, timeout: timeout, onResponse: onResponse)
     }
 
-    public func sendCustomPacket(_ dict: [String: Any], msgId: Int, onResponse: (([String: Any]) -> Void)? = nil) {
+    public func sendCustomPacket(_ dict: [String: Any], msgId: Int, timeout: TimeInterval? = nil, onResponse: (([String: Any]) -> Void)? = nil) {
+        var packet = dict
+        if packet["msg_id"] == nil {
+            packet["msg_id"] = msgId
+        }
+        enqueuePacket(packet, msgId: msgId, timeout: timeout, onResponse: onResponse)
+    }
+
+    private func enqueuePacket(_ dict: [String: Any], msgId: Int, timeout: TimeInterval?, onResponse: (([String: Any]) -> Void)?) {
         queue.async { [weak self] in
             guard let self = self, let connection = self.connection, connection.state == .ready else {
-                onResponse?(["rval": -1, "error": "No conectado"])
+                if let onResponse = onResponse {
+                    DispatchQueue.main.async {
+                        onResponse(["rval": -1, "error": "No conectado"])
+                    }
+                }
                 return
             }
 
+            // Respetar pausa mínima de 0.3s como exige el firmware Ambarella para no ignorar paquetes
             let now = Date().timeIntervalSince1970
             let elapsed = now - self.lastSendTime
             if elapsed < 0.30 {
@@ -362,12 +451,24 @@ public class CameraManager: ObservableObject {
             if packet["token"] == nil {
                 packet["token"] = self.sessionToken
             }
-            if packet["msg_id"] == nil {
-                packet["msg_id"] = msgId
-            }
 
             if let onResponse = onResponse {
-                self.pendingCallbacks[msgId, default: []].append(onResponse)
+                let callbackId = UUID()
+                let effectiveTimeout = timeout ?? (msgId == 1282 ? 10.0 : 5.0)
+                let timeoutWork = DispatchWorkItem { [weak self] in
+                    guard let self = self else { return }
+                    guard var list = self.pendingCallbacks[msgId],
+                          let idx = list.firstIndex(where: { $0.id == callbackId }) else { return }
+                    let expired = list.remove(at: idx)
+                    self.pendingCallbacks[msgId] = list.isEmpty ? nil : list
+                    DispatchQueue.main.async {
+                        expired.callback(["rval": -1, "timeout": true, "error": "Tiempo de espera agotado"])
+                    }
+                }
+                self.pendingCallbacks[msgId, default: []].append(
+                    PendingCallback(id: callbackId, callback: onResponse, timeoutWorkItem: timeoutWork)
+                )
+                self.queue.asyncAfter(deadline: .now() + effectiveTimeout, execute: timeoutWork)
             }
 
             self.sendRawJSON(packet)
@@ -386,46 +487,75 @@ public class CameraManager: ObservableObject {
         }))
     }
 
-    private func startReceiving() {
+    private func startReceiving(generation: UInt64) {
         connection?.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
             guard let self = self else { return }
-            if let data = data, !data.isEmpty,
-               let str = String(data: data, encoding: .utf8) {
-                self.processIncomingChunk(str)
-            }
-            if isComplete || error != nil {
-                print("Socket TCP cerrado por cámara (isComplete=\(isComplete), err=\(String(describing: error)))")
-                self.cleanupConnection()
-                if !self.isUserDisconnected {
-                    self.scheduleAutoReconnect(delay: 1.0)
+            self.queue.async {
+                guard self.connectionGeneration == generation else { return }
+                if let data = data, !data.isEmpty {
+                    self.lastReceiveTime = Date().timeIntervalSince1970
+                    self.processIncomingChunk(data)
                 }
-            } else {
-                self.startReceiving()
+                if isComplete || error != nil {
+                    print("Socket TCP cerrado por cámara (isComplete=\(isComplete), err=\(String(describing: error)))")
+                    self.cleanupConnectionLocked()
+                    if !self.isUserDisconnected && !self.isBackgrounded {
+                        self.scheduleAutoReconnect(delay: 1.0)
+                    }
+                } else {
+                    self.startReceiving(generation: generation)
+                }
             }
         }
     }
 
-    private func processIncomingChunk(_ chunk: String) {
+    private func processIncomingChunk(_ chunk: Data) {
         receiveBuffer.append(chunk)
-        while let openIdx = receiveBuffer.firstIndex(of: "{") {
-            receiveBuffer.removeSubrange(receiveBuffer.startIndex..<openIdx)
+        let openBrace: UInt8 = 0x7B  // '{'
+        let closeBrace: UInt8 = 0x7D // '}'
+        let quoteByte: UInt8 = 0x22  // '"'
+        let backslash: UInt8 = 0x5C  // '\'
+
+        while let openIdx = receiveBuffer.firstIndex(of: openBrace) {
+            if openIdx > receiveBuffer.startIndex {
+                receiveBuffer.removeSubrange(receiveBuffer.startIndex..<openIdx)
+            }
+
             var depth = 0
-            var closeIdx: String.Index?
+            var inString = false
+            var escaped = false
+            var closeIdx: Data.Index?
+
             for idx in receiveBuffer.indices {
-                if receiveBuffer[idx] == "{" { depth += 1 }
-                else if receiveBuffer[idx] == "}" {
-                    depth -= 1
-                    if depth == 0 {
-                        closeIdx = idx
-                        break
+                let byte = receiveBuffer[idx]
+                if inString {
+                    if escaped {
+                        escaped = false
+                    } else if byte == backslash {
+                        escaped = true
+                    } else if byte == quoteByte {
+                        inString = false
+                    }
+                } else {
+                    if byte == quoteByte {
+                        inString = true
+                    } else if byte == openBrace {
+                        depth += 1
+                    } else if byte == closeBrace {
+                        depth -= 1
+                        if depth == 0 {
+                            closeIdx = idx
+                            break
+                        }
                     }
                 }
             }
+
             guard let end = closeIdx else { break }
-            let jsonSub = String(receiveBuffer[receiveBuffer.startIndex...end])
+            let jsonData = Data(receiveBuffer[receiveBuffer.startIndex...end])
             receiveBuffer.removeSubrange(receiveBuffer.startIndex...end)
-            if let d = jsonSub.data(using: .utf8),
-               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+
+            if let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
                 handleParsedJSON(obj)
             }
         }
@@ -436,20 +566,24 @@ public class CameraManager: ObservableObject {
         let rvalOpt = obj["rval"] as? Int
         let rval = rvalOpt ?? -1
 
-        // Si había un callback esperando este msgId, ejecutar el primero en cola (FIFO)
+        // Si había un callback esperando este msgId, ejecutar el primero en cola (FIFO) y cancelar su timeout
         var callbackToRun: (([String: Any]) -> Void)? = nil
-        if let list = pendingCallbacks[msgId], !list.isEmpty {
-            callbackToRun = pendingCallbacks[msgId]?.removeFirst()
+        if var list = pendingCallbacks[msgId], !list.isEmpty {
+            let entry = list.removeFirst()
+            entry.timeoutWorkItem.cancel()
+            pendingCallbacks[msgId] = list.isEmpty ? nil : list
+            callbackToRun = entry.callback
         }
         if let cb = callbackToRun {
             DispatchQueue.main.async { cb(obj) }
         }
 
-        DispatchQueue.main.async {
-            switch msgId {
-            case 257: // CONNECT
-                self.handshakeTimeoutItem?.cancel()
-                if rval == 0, let tok = obj["param"] as? Int {
+        if msgId == 257 {
+            handshakeTimeoutItem?.cancel()
+            if rval == 0, let tok = obj["param"] as? Int {
+                isSocketConnected = true
+                isSocketConnecting = false
+                DispatchQueue.main.async {
                     self.sessionToken = tok
                     self.isConnected = true
                     self.isConnecting = false
@@ -458,11 +592,19 @@ public class CameraManager: ObservableObject {
                     self.syncCameraDate()
                     self.hasSyncedSettingsOnConnect = false
                     self.fetchInitialState()
-                } else {
-                    self.lastStatusMessage = "Reconectando con la cámara..."
-                    self.cleanupConnection()
-                    self.scheduleAutoReconnect(delay: 1.0)
                 }
+            } else {
+                DispatchQueue.main.async {
+                    self.lastStatusMessage = "Reconectando con la cámara..."
+                }
+                cleanupConnectionLocked()
+                scheduleAutoReconnect(delay: 1.0)
+            }
+            return
+        }
+
+        DispatchQueue.main.async {
+            switch msgId {
 
             case 4361: // BATERÍA
                 let rawVal: Int? = (obj["param"] as? Int) ?? (Int(obj["param"] as? String ?? ""))
@@ -1263,30 +1405,59 @@ public class CameraManager: ObservableObject {
         disconnect()
     }
 
-    // MARK: - Exploración microSD vía TCP (CHANGE_DIR 1283 y LIST_DIR 1282)
+    // MARK: - Exploración microSD vía TCP (CHANGE_DIR 1283 y LIST_DIR 1282 serializados)
+
+    private func enqueueSDOperation(_ operation: @escaping (@escaping () -> Void) -> Void) {
+        queue.async {
+            self.sdOperationQueue.append(operation)
+            self.runNextSDOperationLocked()
+        }
+    }
+
+    private func runNextSDOperationLocked() {
+        guard !isExecutingSDOperation, !sdOperationQueue.isEmpty else { return }
+        isExecutingSDOperation = true
+        let next = sdOperationQueue.removeFirst()
+        next { [weak self] in
+            self?.queue.async {
+                guard let self = self else { return }
+                self.isExecutingSDOperation = false
+                self.runNextSDOperationLocked()
+            }
+        }
+    }
 
     public func listDCIMFolders(completion: @escaping ([String]) -> Void) {
         guard isConnected else { completion([]); return }
-        // 1. Cambiar a /tmp/SD0/DCIM/
-        sendCommand(msgId: 1283, param: "/tmp/SD0/DCIM/") { _ in
-            // 2. Listar directorios
-            self.sendCommand(msgId: 1282, param: nil) { resp in
-                var folders: [String] = []
-                if let listing = resp["listing"] as? [[String: Any]] {
-                    for entry in listing {
-                        for (key, _) in entry {
-                            if key.hasSuffix("/") {
-                                let name = String(key.dropLast())
-                                if !folders.contains(name) {
-                                    folders.append(name)
+        enqueueSDOperation { done in
+            // 1. Cambiar a /tmp/SD0/DCIM/
+            self.sendCommand(msgId: 1283, param: "/tmp/SD0/DCIM/") { cdResp in
+                guard (cdResp["rval"] as? Int) == 0 else {
+                    DispatchQueue.main.async { completion([]) }
+                    done()
+                    return
+                }
+                // 2. Listar directorios
+                self.sendCommand(msgId: 1282, param: nil) { resp in
+                    var folders: [String] = []
+                    if let listing = resp["listing"] as? [[String: Any]] {
+                        for entry in listing {
+                            for (key, _) in entry {
+                                if key.hasSuffix("/") {
+                                    let name = String(key.dropLast())
+                                    if !folders.contains(name) {
+                                        folders.append(name)
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                DispatchQueue.main.async {
-                    self.dcimFolders = folders.sorted()
-                    completion(folders.sorted())
+                    let sorted = folders.sorted()
+                    DispatchQueue.main.async {
+                        self.dcimFolders = sorted
+                        completion(sorted)
+                    }
+                    done()
                 }
             }
         }
@@ -1295,34 +1466,42 @@ public class CameraManager: ObservableObject {
     public func listFilesInFolder(_ folder: String, completion: @escaping ([SDFileItem]) -> Void) {
         guard isConnected else { completion([]); return }
         let target = "/tmp/SD0/DCIM/\(folder.trimmingCharacters(in: CharacterSet(charactersIn: "/")))/"
-        sendCommand(msgId: 1283, param: target) { _ in
-            self.sendCommand(msgId: 1282, param: nil) { resp in
-                var files: [SDFileItem] = []
-                if let listing = resp["listing"] as? [[String: Any]] {
-                    let allUpperNames: Set<String> = Set(listing.flatMap { $0.keys }.map { $0.uppercased() })
-                    for entry in listing {
-                        for (fname, dateStr) in entry {
-                            let upper = fname.uppercased()
-                            if fname.hasSuffix("/") || upper.hasSuffix(".THM") { continue }
-                            // Ocultar el proxy ligero AB.MP4 cuando existe su maestro AA.MP4
-                            if upper.hasSuffix("AB.MP4") {
-                                let aaPartner = String(upper.dropLast(6)) + "AA.MP4"
-                                if allUpperNames.contains(aaPartner) { continue }
+        enqueueSDOperation { done in
+            self.sendCommand(msgId: 1283, param: target) { cdResp in
+                guard (cdResp["rval"] as? Int) == 0 else {
+                    DispatchQueue.main.async { completion([]) }
+                    done()
+                    return
+                }
+                self.sendCommand(msgId: 1282, param: nil) { resp in
+                    var files: [SDFileItem] = []
+                    if let listing = resp["listing"] as? [[String: Any]] {
+                        let allUpperNames: Set<String> = Set(listing.flatMap { $0.keys }.map { $0.uppercased() })
+                        for entry in listing {
+                            for (fname, dateStr) in entry {
+                                let upper = fname.uppercased()
+                                if fname.hasSuffix("/") || upper.hasSuffix(".THM") { continue }
+                                // Ocultar el proxy ligero AB.MP4 cuando existe su maestro AA.MP4
+                                if upper.hasSuffix("AB.MP4") {
+                                    let aaPartner = String(upper.dropLast(6)) + "AA.MP4"
+                                    if allUpperNames.contains(aaPartner) { continue }
+                                }
+                                let isVid = upper.hasSuffix(".MP4")
+                                let item = SDFileItem(
+                                    folder: folder,
+                                    filename: fname,
+                                    isVideo: isVid,
+                                    date: "\(dateStr)"
+                                )
+                                files.append(item)
                             }
-                            let isVid = upper.hasSuffix(".MP4")
-                            let item = SDFileItem(
-                                folder: folder,
-                                filename: fname,
-                                isVideo: isVid,
-                                date: "\(dateStr)"
-                            )
-                            files.append(item)
                         }
                     }
-                }
-                DispatchQueue.main.async {
-                    // Ordenar por nombre descendente (fotos más recientes primero)
-                    completion(files.sorted(by: { $0.filename > $1.filename }))
+                    DispatchQueue.main.async {
+                        // Ordenar por nombre descendente (fotos más recientes primero)
+                        completion(files.sorted(by: { $0.filename > $1.filename }))
+                    }
+                    done()
                 }
             }
         }
